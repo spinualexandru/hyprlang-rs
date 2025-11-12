@@ -3,6 +3,358 @@
 //! This module provides a high-level interface for working with Hyprland configurations.
 //! It automatically registers all Hyprland handlers, special categories, and provides
 //! typed access to common configuration options.
+//!
+//! # Overview
+//!
+//! The [`Hyprland`] struct wraps the low-level [`Config`] API with Hyprland-specific
+//! conveniences:
+//!
+//! - **Automatic Handler Registration**: All Hyprland handlers (bind, monitor, env, etc.)
+//!   are pre-registered when you create a [`Hyprland`] instance
+//! - **Typed Accessor Methods**: Instead of string-based key access, use typed methods
+//!   like [`general_border_size()`](Hyprland::general_border_size) that return the correct type
+//! - **Handler Arrays**: Access all binds, windowrules, etc. as arrays with methods like
+//!   [`all_binds()`](Hyprland::all_binds)
+//! - **Special Categories**: Device and monitor categories are pre-configured
+//!
+//! # When to Use This Module
+//!
+//! Use this module when:
+//! - You're parsing Hyprland configuration files
+//! - You want typed, convenient access to common config values
+//! - You're building tools for Hyprland users (config editors, validators, etc.)
+//!
+//! Use the low-level [`Config`] API when:
+//! - You're implementing a different config language
+//! - You need full control over handler registration
+//! - You want minimal dependencies
+//!
+//! # Quick Start
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! use hyprlang::Hyprland;
+//!
+//! // Create instance - handlers are automatically registered
+//! let mut hypr = Hyprland::new();
+//!
+//! // Parse configuration
+//! hypr.parse(r#"
+//!     general {
+//!         border_size = 2
+//!         gaps_in = 5
+//!         col.active_border = rgba(33ccffee)
+//!     }
+//!
+//!     bind = SUPER, Q, exec, kitty
+//!     bind = SUPER, C, killactive
+//! "#).unwrap();
+//!
+//! // Access with typed methods
+//! let border = hypr.general_border_size().unwrap();
+//! let color = hypr.general_active_border_color().unwrap();
+//!
+//! // Get all bindings as an array
+//! let binds = hypr.all_binds();
+//! assert_eq!(binds.len(), 2);
+//! # }
+//! ```
+//!
+//! # Configuration Categories
+//!
+//! ## General Settings
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! # use hyprlang::Hyprland;
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let mut hypr = Hyprland::new();
+//! # hypr.parse(r#"
+//! # general {
+//! #     border_size = 2
+//! #     gaps_in = 5
+//! #     gaps_out = 20
+//! #     layout = dwindle
+//! #     allow_tearing = false
+//! #     col.active_border = rgba(33ccffee)
+//! #     col.inactive_border = rgba(595959aa)
+//! # }
+//! # "#)?;
+//! // Access general settings
+//! let border_size = hypr.general_border_size()?;
+//! let gaps_in = hypr.general_gaps_in()?;
+//! let layout = hypr.general_layout()?;
+//! let tearing = hypr.general_allow_tearing()?;
+//!
+//! // Access colors
+//! let active = hypr.general_active_border_color()?;
+//! let inactive = hypr.general_inactive_border_color()?;
+//! # Ok(())
+//! # }
+//! # example().unwrap();
+//! # }
+//! ```
+//!
+//! ## Decoration Settings
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! # use hyprlang::Hyprland;
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let mut hypr = Hyprland::new();
+//! # hypr.parse(r#"
+//! # decoration {
+//! #     rounding = 10
+//! #     active_opacity = 1.0
+//! #     inactive_opacity = 0.9
+//! #     blur {
+//! #         enabled = true
+//! #         size = 3
+//! #         passes = 1
+//! #     }
+//! # }
+//! # "#)?;
+//! let rounding = hypr.decoration_rounding()?;
+//! let active_opacity = hypr.decoration_active_opacity()?;
+//! let blur_enabled = hypr.decoration_blur_enabled()?;
+//! let blur_size = hypr.decoration_blur_size()?;
+//! # Ok(())
+//! # }
+//! # example().unwrap();
+//! # }
+//! ```
+//!
+//! ## Animation Settings
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! # use hyprlang::Hyprland;
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let mut hypr = Hyprland::new();
+//! # hypr.parse(r#"
+//! # animations {
+//! #     enabled = true
+//! #     animation = windows, 1, 4, default
+//! #     animation = fade, 1, 3, quick
+//! #     bezier = easeOut, 0.23, 1, 0.32, 1
+//! # }
+//! # "#)?;
+//! if hypr.animations_enabled()? {
+//!     // Get all animation definitions
+//!     for anim in hypr.all_animations() {
+//!         println!("Animation: {}", anim);
+//!     }
+//!
+//!     // Get all bezier curves
+//!     for bezier in hypr.all_beziers() {
+//!         println!("Bezier: {}", bezier);
+//!     }
+//! }
+//! # Ok(())
+//! # }
+//! # example().unwrap();
+//! # }
+//! ```
+//!
+//! ## Handler Arrays
+//!
+//! All Hyprland handlers (bind, windowrule, etc.) are collected into arrays:
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! # use hyprlang::Hyprland;
+//! # let mut hypr = Hyprland::new();
+//! # hypr.parse(r#"
+//! # bind = SUPER, Q, exec, kitty
+//! # bind = SUPER, C, killactive
+//! # windowrule = float, ^(kitty)$
+//! # monitor = ,preferred,auto,1
+//! # env = XCURSOR_SIZE,24
+//! # exec-once = waybar
+//! # "#).unwrap();
+//! // Get all keybindings
+//! let binds = hypr.all_binds();
+//! for bind in binds {
+//!     println!("Bind: {}", bind);
+//! }
+//!
+//! // Get all window rules
+//! let rules = hypr.all_windowrules();
+//!
+//! // Get all monitors
+//! let monitors = hypr.all_monitors();
+//!
+//! // Get all environment variables
+//! let envs = hypr.all_env();
+//!
+//! // Get all exec-once commands
+//! let execs = hypr.all_exec_once();
+//! # }
+//! ```
+//!
+//! ## Variables
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! # use hyprlang::Hyprland;
+//! # let mut hypr = Hyprland::new();
+//! # hypr.parse(r#"
+//! # $terminal = kitty
+//! # $mod = SUPER
+//! # "#).unwrap();
+//! // Get all variables
+//! let vars = hypr.variables();
+//! for (name, value) in vars {
+//!     println!("${} = {}", name, value);
+//! }
+//!
+//! // Get specific variable
+//! if let Some(terminal) = hypr.get_variable("terminal") {
+//!     println!("Terminal: {}", terminal);
+//! }
+//! # }
+//! ```
+//!
+//! # Pre-Registered Handlers
+//!
+//! The following handlers are automatically registered:
+//!
+//! **Root-level handlers:**
+//! - `monitor` - Monitor configuration
+//! - `env` - Environment variables
+//! - `bind`, `bindm`, `bindel`, `bindl`, `bindr`, `binde`, `bindn` - Keybindings
+//! - `windowrule`, `windowrulev2` - Window rules
+//! - `layerrule` - Layer rules
+//! - `workspace` - Workspace configuration
+//! - `exec`, `exec-once` - Commands
+//! - `source` - File inclusion
+//! - `blurls` - Blur layer surface
+//! - `plugin` - Plugin loading
+//!
+//! **Category-specific handlers:**
+//! - `animations:animation` - Animation definitions
+//! - `animations:bezier` - Bezier curve definitions
+//!
+//! **Special categories:**
+//! - `device[name]` - Per-device input configuration (keyed)
+//! - `monitor[name]` - Per-monitor configuration (keyed)
+//!
+//! # Direct Config Access
+//!
+//! If you need access to the underlying [`Config`] API:
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! # use hyprlang::Hyprland;
+//! # let mut hypr = Hyprland::new();
+//! // Immutable access
+//! let config = hypr.config();
+//! let value = config.get("custom:key");
+//!
+//! // Mutable access
+//! let config = hypr.config_mut();
+//! config.register_handler_fn("custom", |ctx| {
+//!     println!("Custom: {}", ctx.value);
+//!     Ok(())
+//! });
+//! # }
+//! ```
+//!
+//! # Examples
+//!
+//! ## Parse a Hyprland Config File
+//!
+//! ```rust,no_run
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! use hyprlang::Hyprland;
+//! use std::path::Path;
+//!
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut hypr = Hyprland::new();
+//! hypr.parse_file(Path::new("~/.config/hypr/hyprland.conf"))?;
+//!
+//! // Access any setting
+//! println!("Border size: {}", hypr.general_border_size()?);
+//! println!("Layout: {}", hypr.general_layout()?);
+//!
+//! // List all keybindings
+//! for (i, bind) in hypr.all_binds().iter().enumerate() {
+//!     println!("[{}] {}", i + 1, bind);
+//! }
+//! # Ok(())
+//! # }
+//! # }
+//! ```
+//!
+//! ## Validate a Hyprland Config
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! use hyprlang::Hyprland;
+//!
+//! fn validate_config(content: &str) -> Result<(), String> {
+//!     let mut hypr = Hyprland::new();
+//!
+//!     hypr.parse(content).map_err(|e| format!("Parse error: {}", e))?;
+//!
+//!     // Validate required settings
+//!     if hypr.general_layout().is_err() {
+//!         return Err("Missing general:layout setting".to_string());
+//!     }
+//!
+//!     // Check for recommended settings
+//!     if hypr.all_binds().is_empty() {
+//!         eprintln!("Warning: No keybindings defined");
+//!     }
+//!
+//!     Ok(())
+//! }
+//! # }
+//! ```
+//!
+//! ## Extract Config Values
+//!
+//! ```rust
+//! # #[cfg(feature = "hyprland")]
+//! # {
+//! use hyprlang::Hyprland;
+//!
+//! # let mut hypr = Hyprland::new();
+//! # hypr.parse(r#"
+//! # general {
+//! #     border_size = 2
+//! #     gaps_in = 5
+//! #     gaps_out = 20
+//! # }
+//! # decoration {
+//! #     rounding = 10
+//! # }
+//! # "#).unwrap();
+//! // Extract settings into a struct
+//! struct Settings {
+//!     border_size: i64,
+//!     gaps_in: String,
+//!     rounding: i64,
+//! }
+//!
+//! let settings = Settings {
+//!     border_size: hypr.general_border_size().unwrap_or(2),
+//!     gaps_in: hypr.general_gaps_in().unwrap_or("5".to_string()),
+//!     rounding: hypr.decoration_rounding().unwrap_or(0),
+//! };
+//! # }
+//! ```
+//!
+//! [`Config`]: crate::Config
 
 use crate::config::{Config, ConfigOptions};
 use crate::error::ParseResult;
@@ -20,7 +372,7 @@ use std::path::Path;
 /// ```no_run
 /// # #[cfg(feature = "hyprland")]
 /// # {
-/// use hyprlang_rs::Hyprland;
+/// use hyprlang::Hyprland;
 /// use std::path::Path;
 ///
 /// let mut hypr = Hyprland::new();
