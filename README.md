@@ -47,7 +47,7 @@ This feature provides:
 ## Quick Start
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::new();
@@ -79,7 +79,7 @@ The `hyprland` feature provides a high-level, type-safe API specifically designe
 
 **Without the Hyprland feature** (using low-level Config API):
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 
@@ -100,7 +100,7 @@ let binds = config.get_handler_calls("bind").unwrap_or(&vec![]);
 
 **With the Hyprland feature** (using high-level Hyprland API):
 ```rust
-use hyprlang_rs::Hyprland;
+use hyprlang::Hyprland;
 
 let mut hypr = Hyprland::new(); // All handlers pre-registered!
 
@@ -116,7 +116,7 @@ let binds = hypr.all_binds();  // Returns Vec<&String>
 ### Complete Example
 
 ```rust
-use hyprlang_rs::Hyprland;
+use hyprlang::Hyprland;
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -325,7 +325,7 @@ The `Hyprland` struct automatically registers these handlers:
 ### Basic Values
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 config.parse(r#"
@@ -350,7 +350,7 @@ assert_eq!(config.get_string("terminal")?, "kitty");
 ### Variables
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 config.parse(r#"
@@ -373,7 +373,7 @@ assert_eq!(config.get_string("my_term")?, "kitty");
 ### Colors
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 config.parse(r#"
@@ -389,7 +389,7 @@ println!("R: {}, G: {}, B: {}, A: {}", color.r, color.g, color.b, color.a);
 ### Vec2 (2D Coordinates)
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 config.parse(r#"
@@ -405,7 +405,7 @@ assert_eq!(pos.y, 200.0);
 ### Expressions
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 config.parse(r#"
@@ -425,7 +425,7 @@ assert_eq!(config.get_int("complex")?, 30);
 ### Nested Categories
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 config.parse(r#"
@@ -448,7 +448,7 @@ assert_eq!(config.get_int("general:gaps:outer")?, 10);
 ### Custom Handlers
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 
@@ -471,7 +471,7 @@ assert_eq!(binds.len(), 2);
 ### Category-Specific Handlers
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 
 let mut config = Config::new();
 
@@ -496,7 +496,7 @@ assert_eq!(anims.len(), 2);
 ### Special Categories
 
 ```rust
-use hyprlang_rs::{Config, SpecialCategoryDescriptor, SpecialCategoryType};
+use hyprlang::{Config, SpecialCategoryDescriptor, SpecialCategoryType};
 
 let mut config = Config::new();
 
@@ -525,7 +525,7 @@ println!("Mouse sensitivity: {:?}", mouse.get("sensitivity"));
 ### Source Directive
 
 ```rust
-use hyprlang_rs::{Config, ConfigOptions};
+use hyprlang::{Config, ConfigOptions};
 use std::path::PathBuf;
 
 let mut options = ConfigOptions::default();
@@ -546,7 +546,7 @@ config.parse(r#"
 ### Parse from File
 
 ```rust
-use hyprlang_rs::Config;
+use hyprlang::Config;
 use std::path::Path;
 
 let mut config = Config::new();
@@ -563,7 +563,7 @@ for key in config.keys() {
 When the `hyprland` feature is enabled, you can use the high-level `Hyprland` struct:
 
 ```rust
-use hyprlang_rs::Hyprland;
+use hyprlang::Hyprland;
 use std::path::Path;
 
 // Create a new Hyprland config (automatically registers all handlers)
@@ -609,7 +609,7 @@ The `Hyprland` struct provides convenient typed access to:
 ## Configuration Options
 
 ```rust
-use hyprlang_rs::{Config, ConfigOptions};
+use hyprlang::{Config, ConfigOptions};
 use std::path::PathBuf;
 
 let mut options = ConfigOptions::default();
