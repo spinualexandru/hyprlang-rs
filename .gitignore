@@ -31,3 +31,8 @@ target
 # already existing elements were commented out
 
 #/target
+
+# Editor directories and files
+.idea/
+.vscode/
+.zed/

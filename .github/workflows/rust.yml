@@ -1,0 +1,52 @@
+name: Rust Build
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: cargo check/test/build (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: [default, hyprland]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust (stable)
+        run: rustup toolchain install stable --profile minimal --no-self-update
+      - name: Cache cargo build artifacts and registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.feature }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # cargo check
+      - name: Cargo check (default)
+        if: ${{ matrix.feature == 'default' }}
+        run: cargo check
+      - name: Cargo check (hyprland)
+        if: ${{ matrix.feature == 'hyprland' }}
+        run: cargo check --no-default-features --features hyprland
+      # cargo test
+      - name: Cargo test (default)
+        if: ${{ matrix.feature == 'default' }}
+        run: cargo test
+      - name: Cargo test (hyprland)
+        if: ${{ matrix.feature == 'hyprland' }}
+        run: cargo test --no-default-features --features hyprland
+      # cargo build
+      - name: Cargo build (release, default)
+        if: ${{ matrix.feature == 'default' }}
+        run: cargo build --release
+      - name: Cargo build (release, hyprland)
+        if: ${{ matrix.feature == 'hyprland' }}
+        run: cargo build --release --no-default-features --features hyprland
