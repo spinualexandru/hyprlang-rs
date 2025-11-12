@@ -4,6 +4,16 @@ A Rust reimplementation of [Hyprlang](https://github.com/hyprwm/hyprlang), the c
 
 Hyprlang is a powerful configuration language featuring variables, nested categories, expressions, custom handlers, and more. This library provides a complete parser and configuration manager with a clean, idiomatic Rust API.
 
+This project is not endorsed by or affiliated with the Hyprland project/HyprWM Organization.
+
+[![Rust Build](https://github.com/spinualexandru/hyprlang-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/spinualexandru/hyprlang-rs/actions/workflows/rust.yml)
+[![Crates.io](https://img.shields.io/crates/v/hyprlang.svg)](https://crates.io/crates/hyprlang)
+[![Docs.rs](https://docs.rs/hyprlang/badge.svg)](https://docs.rs/hyprlang)
+[![License](https://img.shields.io/crates/l/hyprlang.svg)](https://img.shields.io/crates/l/hyprlang.svg)
+![Crates.io Total Downloads](https://img.shields.io/crates/d/hyprlang)
+![Crates.io Size](https://img.shields.io/crates/size/hyprlang)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/spinualexandru)](https://github.com/sponsors/spinualexandru)
+
 ## Features
 
 - 🎯 **Complete Hyprlang Implementation** - Full compatibility with the original C++ version
@@ -25,7 +35,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.1.0"
+hyprlang = "0.1.4"
 ```
 
 ### Optional Features
@@ -36,7 +46,7 @@ Enable the `hyprland` feature to get a high-level `Hyprland` struct with pre-con
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.1.0", features = ["hyprland"] }
+hyprlang = { version = "0.1.4", features = ["hyprland"] }
 ```
 
 This feature provides:
