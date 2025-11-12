@@ -1,0 +1,849 @@
+# Hyprlang
+
+> A scripting language interpreter and parser for Hyprlang and Hyprland configuration files.
+
+Hyprlang is a Rust implementation of the Hyprlang configuration language parser, used by Hyprland - the dynamic tiling Wayland compositor. This library provides a complete parser and configuration manager with a clean, idiomatic Rust API.
+
+## Installation
+
+```toml
+[dependencies]
+hyprlang = "0.1.0"
+
+# With Hyprland high-level API
+hyprlang = { version = "0.1.0", features = ["hyprland"] }
+```
+
+## Quick Start
+
+### Basic Usage
+
+```rust
+use hyprlang::Config;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = Config::new();
+
+    // Parse configuration string
+    config.parse(r#"
+        general {
+            border_size = 2
+            gaps_in = 5
+            gaps_out = 20
+        }
+    "#)?;
+
+    // Access values with colon-separated paths
+    let border_size = config.get_int("general:border_size")?;
+    let gaps_in = config.get_int("general:gaps_in")?;
+
+    println!("Border: {}, Gaps: {}", border_size, gaps_in);
+    Ok(())
+}
+```
+
+### Parse From File
+
+```rust
+use hyprlang::Config;
+use std::path::Path;
+
+let mut config = Config::new();
+config.parse_file(Path::new("/path/to/config.conf"))?;
+```
+
+## Type System
+
+Hyprlang supports six value types:
+
+### Integer (i64)
+
+```rust
+config.parse("count = 42")?;
+let count = config.get_int("count")?; // Returns 42
+```
+
+### Float (f64)
+
+```rust
+config.parse("opacity = 0.95")?;
+let opacity = config.get_float("opacity")?; // Returns 0.95
+```
+
+### String
+
+```rust
+// Quoted or unquoted
+config.parse(r#"
+    terminal = kitty
+    shell = "zsh"
+"#)?;
+
+let terminal = config.get_string("terminal")?; // Returns "kitty"
+```
+
+### Boolean
+
+```rust
+config.parse("enabled = true")?;
+
+// Booleans are stored as strings, check manually
+let enabled = config.get_string("enabled")? == "true";
+```
+
+### Color (RGBA)
+
+```rust
+config.parse(r#"
+    color1 = rgba(33ccffee)
+    color2 = rgb(255, 128, 64)
+    color3 = 0xff8040ff
+"#)?;
+
+let color = config.get_color("color1")?;
+println!("R:{}, G:{}, B:{}, A:{}", color.r, color.g, color.b, color.a);
+```
+
+### Vec2 (2D Coordinates)
+
+```rust
+config.parse(r#"
+    position = (100, 200)
+    size = 800, 600
+"#)?;
+
+let pos = config.get_vec2("position")?;
+println!("X: {}, Y: {}", pos.x, pos.y);
+```
+
+## Variables
+
+Variables use `$` prefix and support recursive expansion:
+
+```rust
+config.parse(r#"
+    $terminal = kitty
+    $mod = SUPER
+
+    # Variables are expanded when used
+    my_term = $terminal
+    modifier = $mod
+"#)?;
+
+// Access variables
+let vars = config.variables();
+assert_eq!(vars.get("terminal"), Some(&"kitty".to_string()));
+
+// Or access expanded values
+assert_eq!(config.get_string("my_term")?, "kitty");
+```
+
+### Environment Variables
+
+```rust
+// Environment variables are automatically available
+config.parse("home = $HOME")?;
+let home = config.get_string("home")?; // Gets from environment
+```
+
+### Variable Cycle Detection
+
+The library automatically detects circular dependencies:
+
+```rust
+// This will return an error
+config.parse(r#"
+    $A = $B
+    $B = $A
+"#)?; // Error: CircularDependency
+```
+
+## Expressions
+
+Expressions use `{{expr}}` syntax with arithmetic operations:
+
+```rust
+config.parse(r#"
+    $base = 10
+
+    double = {{$base * 2}}
+    sum = {{5 + 3}}
+    complex = {{($base + 5) * 2}}
+"#)?;
+
+assert_eq!(config.get_int("double")?, 20);
+assert_eq!(config.get_int("sum")?, 8);
+assert_eq!(config.get_int("complex")?, 30);
+```
+
+**Supported operations:**
+- Addition: `+`
+- Subtraction: `-`
+- Multiplication: `*`
+- Division: `/`
+- Parentheses: `(` `)`
+- Variable references: `$VAR`
+
+## Nested Categories
+
+Categories create hierarchical namespaces:
+
+```rust
+config.parse(r#"
+    general {
+        border_size = 2
+
+        gaps {
+            inner = 5
+            outer = 10
+        }
+    }
+"#)?;
+
+// Access with colon-separated paths
+let border = config.get_int("general:border_size")?;
+let inner = config.get_int("general:gaps:inner")?;
+let outer = config.get_int("general:gaps:outer")?;
+```
+
+## Custom Handlers
+
+Handlers are custom keywords that execute code when encountered:
+
+### Root-Level Handlers
+
+```rust
+use hyprlang::Config;
+
+let mut config = Config::new();
+
+// Register a handler
+config.register_handler_fn("bind", |ctx| {
+    println!("Keybinding: {}", ctx.value);
+    Ok(())
+});
+
+config.parse(r#"
+    bind = SUPER, Q, exec, kitty
+    bind = SUPER, C, killactive
+"#)?;
+
+// Access all handler calls as an array
+let binds = config.get_handler_calls("bind").unwrap();
+assert_eq!(binds.len(), 2);
+assert_eq!(binds[0], "SUPER, Q, exec, kitty");
+```
+
+### Category-Specific Handlers
+
+Handlers that only work within specific categories:
+
+```rust
+config.register_category_handler_fn("animations", "animation", |ctx| {
+    println!("Animation: {}", ctx.value);
+    Ok(())
+});
+
+config.parse(r#"
+    animations {
+        animation = windows, 1, 4, default
+        animation = fade, 1, 3, quick
+    }
+"#)?;
+
+// Handler calls are namespaced by category
+let animations = config.get_handler_calls("animations:animation").unwrap();
+assert_eq!(animations.len(), 2);
+```
+
+### Handler Context
+
+Handlers receive a context with information about the call:
+
+```rust
+config.register_handler_fn("custom", |ctx| {
+    println!("Category path: {}", ctx.category_path());
+    println!("Keyword: {}", ctx.keyword);
+    println!("Value: {}", ctx.value);
+
+    if let Some(flags) = &ctx.flags {
+        println!("Flags: {}", flags);
+    }
+
+    Ok(())
+});
+```
+
+## Special Categories
+
+Special categories have unique behaviors:
+
+### Keyed Categories
+
+Each instance has an explicit key in brackets:
+
+```rust
+use hyprlang::{Config, SpecialCategoryDescriptor};
+
+let mut config = Config::new();
+
+// Register keyed category
+config.register_special_category(
+    SpecialCategoryDescriptor::keyed("device", "name")
+);
+
+config.parse(r#"
+    device[mouse] {
+        sensitivity = 2.5
+        accel_profile = flat
+    }
+
+    device[keyboard] {
+        repeat_rate = 50
+        repeat_delay = 300
+    }
+"#)?;
+
+// Access specific instance
+let mouse = config.get_special_category("device", "mouse")?;
+println!("Mouse sensitivity: {:?}", mouse.get("sensitivity"));
+
+// List all keys
+let keys = config.list_special_category_keys("device");
+assert!(keys.contains(&"mouse".to_string()));
+```
+
+### Static Categories
+
+Single instance per category (no key):
+
+```rust
+config.register_special_category(
+    SpecialCategoryDescriptor::static_category("global")
+);
+
+config.parse(r#"
+    global {
+        setting = value
+    }
+"#)?;
+```
+
+### Anonymous Categories
+
+Auto-generated numeric keys:
+
+```rust
+config.register_special_category(
+    SpecialCategoryDescriptor::anonymous("window")
+);
+
+config.parse(r#"
+    window {
+        title = "Window 1"
+    }
+
+    window {
+        title = "Window 2"
+    }
+"#)?;
+
+// Access by auto-generated key
+let win0 = config.get_special_category("window", "0")?;
+let win1 = config.get_special_category("window", "1")?;
+```
+
+## Query Configuration
+
+### List All Keys
+
+```rust
+let keys = config.keys();
+for key in keys {
+    println!("Key: {}", key);
+}
+```
+
+### Check if Key Exists
+
+```rust
+if config.has("general:border_size") {
+    let border = config.get_int("general:border_size")?;
+}
+```
+
+### Get All Variables
+
+```rust
+let vars = config.variables();
+for (name, value) in vars {
+    println!("${} = {}", name, value);
+}
+```
+
+### Get All Handler Calls
+
+```rust
+let all_handlers = config.all_handler_calls();
+for (handler_name, calls) in all_handlers {
+    println!("{}: {} calls", handler_name, calls.len());
+    for call in calls {
+        println!("  - {}", call);
+    }
+}
+```
+
+## Configuration Options
+
+Customize parsing behavior:
+
+```rust
+use hyprlang::{Config, ConfigOptions};
+use std::path::PathBuf;
+
+let mut options = ConfigOptions::default();
+
+// Collect all errors instead of stopping at first
+options.throw_all_errors = false;
+
+// Allow parsing after initial parse
+options.allow_dynamic_parsing = true;
+
+// Base directory for source directives
+options.base_dir = Some(PathBuf::from("/path/to/config"));
+
+let config = Config::with_options(options);
+```
+
+## Source Directives
+
+Include external configuration files:
+
+```rust
+let mut options = ConfigOptions::default();
+options.base_dir = Some(PathBuf::from("/config/dir"));
+
+let mut config = Config::with_options(options);
+
+config.parse(r#"
+    source = ./colors.conf
+
+    general {
+        border_size = 2
+    }
+"#)?;
+// colors.conf will be parsed and merged
+```
+
+## Conditional Directives
+
+Control parsing based on conditions:
+
+```hyprlang
+# hyprlang if $CONDITION
+    # Only parsed if $CONDITION is set
+    enabled_setting = true
+# hyprlang endif
+
+# hyprlang noerror
+    # Suppress errors in this block
+    experimental_feature = value
+```
+
+## Multiline Values
+
+Line continuation with backslash:
+
+```hyprlang
+long_value = first part \
+             second part \
+             third part
+```
+
+## Hyprland High-Level API
+
+When using the `hyprland` feature, you get a convenient high-level API:
+
+### Enable the Feature
+
+```toml
+[dependencies]
+hyprlang = { version = "0.1.0", features = ["hyprland"] }
+```
+
+### Basic Usage
+
+```rust
+use hyprlang::Hyprland;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // All Hyprland handlers pre-registered
+    let mut hypr = Hyprland::new();
+
+    hypr.parse(r#"
+        general {
+            border_size = 2
+            gaps_in = 5
+            col.active_border = rgba(33ccffee)
+        }
+
+        bind = SUPER, Q, exec, kitty
+        bind = SUPER, C, killactive
+    "#)?;
+
+    // Typed access to config values
+    let border = hypr.general_border_size()?;
+    let gaps = hypr.general_gaps_in()?;
+    let color = hypr.general_active_border_color()?;
+
+    // Get all bindings as array
+    let binds = hypr.all_binds();
+    for bind in binds {
+        println!("Bind: {}", bind);
+    }
+
+    Ok(())
+}
+```
+
+### Available Typed Methods
+
+```rust
+// General settings
+hypr.general_border_size() -> Result<i64>
+hypr.general_gaps_in() -> Result<String>
+hypr.general_gaps_out() -> Result<String>
+hypr.general_layout() -> Result<&str>
+hypr.general_allow_tearing() -> Result<bool>
+hypr.general_active_border_color() -> Result<Color>
+hypr.general_inactive_border_color() -> Result<Color>
+
+// Decoration settings
+hypr.decoration_rounding() -> Result<i64>
+hypr.decoration_active_opacity() -> Result<f64>
+hypr.decoration_inactive_opacity() -> Result<f64>
+hypr.decoration_blur_enabled() -> Result<bool>
+hypr.decoration_blur_size() -> Result<i64>
+hypr.decoration_blur_passes() -> Result<i64>
+
+// Animation settings
+hypr.animations_enabled() -> Result<bool>
+hypr.all_animations() -> Vec<&String>
+hypr.all_beziers() -> Vec<&String>
+
+// Input settings
+hypr.input_kb_layout() -> Result<&str>
+hypr.input_follow_mouse() -> Result<i64>
+hypr.input_sensitivity() -> Result<f64>
+hypr.input_touchpad_natural_scroll() -> Result<bool>
+
+// Layout settings
+hypr.dwindle_pseudotile() -> Result<bool>
+hypr.dwindle_preserve_split() -> Result<bool>
+hypr.master_new_status() -> Result<&str>
+
+// Misc settings
+hypr.misc_disable_hyprland_logo() -> Result<bool>
+hypr.misc_force_default_wallpaper() -> Result<i64>
+```
+
+### Handler Arrays
+
+```rust
+// All keybindings
+let binds = hypr.all_binds();          // Vec<&String>
+let bindm = hypr.all_bindm();          // Mouse bindings
+let bindel = hypr.all_bindel();        // bindel definitions
+let bindl = hypr.all_bindl();          // bindl definitions
+
+// Window rules
+let rules = hypr.all_windowrules();    // windowrule definitions
+let rules2 = hypr.all_windowrulesv2(); // windowrulev2 definitions
+let layer = hypr.all_layerrules();     // layerrule definitions
+
+// Other handlers
+let workspaces = hypr.all_workspaces();
+let monitors = hypr.all_monitors();
+let envs = hypr.all_env();
+let execs = hypr.all_exec();
+let exec_once = hypr.all_exec_once();
+```
+
+### Variables
+
+```rust
+// Get all variables
+let vars = hypr.variables();
+for (name, value) in vars {
+    println!("${} = {}", name, value);
+}
+
+// Get specific variable
+if let Some(terminal) = hypr.get_variable("terminal") {
+    println!("Terminal: {}", terminal);
+}
+```
+
+### Access Underlying Config
+
+```rust
+// If you need low-level Config access
+let config: &Config = hypr.config();
+let config: &mut Config = hypr.config_mut();
+
+// Use any Config method
+config.register_handler_fn("custom", |ctx| { /* ... */ Ok(()) });
+```
+
+### Pre-Registered Handlers
+
+The `Hyprland` API automatically registers these handlers:
+
+**Root-level:**
+- `monitor` - Monitor configuration
+- `env` - Environment variables
+- `bind`, `bindm`, `bindel`, `bindl`, `bindr`, `binde`, `bindn` - Keybindings
+- `windowrule`, `windowrulev2` - Window rules
+- `layerrule` - Layer rules
+- `workspace` - Workspace configuration
+- `exec`, `exec-once` - Commands
+- `source` - File inclusion
+- `blurls` - Blur layer surface
+- `plugin` - Plugin loading
+
+**Category-specific:**
+- `animations:animation` - Animation definitions
+- `animations:bezier` - Bezier curve definitions
+
+**Special categories:**
+- `device[name]` - Per-device input configuration
+- `monitor[name]` - Per-monitor configuration
+
+## Error Handling
+
+All parsing operations return `ParseResult<T>` which is `Result<T, ConfigError>`:
+
+```rust
+use hyprlang::Config;
+
+let mut config = Config::new();
+
+match config.parse("invalid = {{unclosed") {
+    Ok(_) => println!("Success"),
+    Err(e) => {
+        eprintln!("Parse error: {}", e);
+        // ConfigError variants:
+        // - ParseError: Grammar/syntax errors
+        // - ValueError: Type conversion errors
+        // - KeyNotFound: Missing configuration key
+        // - CircularDependency: Variable cycle
+        // - FileError: File I/O errors
+        // - HandlerError: Handler execution errors
+    }
+}
+```
+
+## Advanced Patterns
+
+### Conditional Value Access
+
+```rust
+// Use unwrap_or for defaults
+let border_size = config.get_int("general:border_size")
+    .unwrap_or(2);
+
+// Check existence before access
+if config.has("custom:setting") {
+    let value = config.get("custom:setting")?;
+}
+```
+
+### Dynamic Handler Registration
+
+```rust
+let handlers = vec!["bind", "bindm", "exec", "exec-once"];
+
+for handler in handlers {
+    config.register_handler_fn(handler, |ctx| {
+        println!("{}: {}", ctx.keyword, ctx.value);
+        Ok(())
+    });
+}
+```
+
+### Iterating Over Categories
+
+```rust
+// Get all keys and group by category
+let keys = config.keys();
+let mut categories = std::collections::HashSet::new();
+
+for key in keys {
+    if let Some(colon_pos) = key.find(':') {
+        let category = &key[..colon_pos];
+        categories.insert(category);
+    }
+}
+
+for category in categories {
+    println!("Category: {}", category);
+}
+```
+
+### Type-Safe Value Extraction
+
+```rust
+use hyprlang::ConfigValue;
+
+let value = config.get("some:key")?;
+
+match value {
+    ConfigValue::Int(i) => println!("Integer: {}", i),
+    ConfigValue::Float(f) => println!("Float: {}", f),
+    ConfigValue::String(s) => println!("String: {}", s),
+    ConfigValue::Vec2(v) => println!("Vec2: ({}, {})", v.x, v.y),
+    ConfigValue::Color(c) => println!("Color: rgba({}, {}, {}, {})",
+        c.r, c.g, c.b, c.a),
+    ConfigValue::Custom { type_name, .. } => println!("Custom: {}", type_name),
+}
+```
+
+## Grammar Reference
+
+### Comments
+
+```hyprlang
+# Single-line comment
+
+## Documentation comment
+```
+
+### Assignments
+
+```hyprlang
+key = value
+category:subcategory:key = value
+```
+
+### Variables
+
+```hyprlang
+$VAR = value
+$TERMINAL = kitty
+my_value = $VAR
+```
+
+### Expressions
+
+```hyprlang
+result = {{10 + 5}}
+complex = {{($base * 2) + (10 / 2)}}
+```
+
+### Categories
+
+```hyprlang
+category {
+    key = value
+
+    nested {
+        deep_key = value
+    }
+}
+```
+
+### Special Categories
+
+```hyprlang
+# Keyed
+device[mouse] {
+    sensitivity = 2.5
+}
+
+# Multiple instances
+device[keyboard] {
+    repeat_rate = 50
+}
+```
+
+### Handlers
+
+```hyprlang
+# Root-level
+bind = SUPER, Q, exec, kitty
+
+# Category-specific
+animations {
+    animation = windows, 1, 4, default
+    bezier = easeOut, 0.23, 1, 0.32, 1
+}
+```
+
+### Colors
+
+```hyprlang
+color1 = rgba(33ccffee)          # RGBA with hex
+color2 = rgba(255, 128, 64, 255) # RGBA with decimals
+color3 = rgb(255, 128, 64)       # RGB
+color4 = 0xff8040ff              # Hex color
+```
+
+### Vec2
+
+```hyprlang
+position = (100, 200)  # With parentheses
+size = 800, 600        # Without parentheses
+```
+
+### Multiline
+
+```hyprlang
+long = first \
+       second \
+       third
+```
+
+### Directives
+
+```hyprlang
+# Conditional
+# hyprlang if $CONDITION
+    setting = value
+# hyprlang endif
+
+# Error suppression
+# hyprlang noerror
+    experimental = value
+
+# Include files
+source = ./other.conf
+```
+
+## Best Practices
+
+1. **Always check for errors**: Use `?` operator or match on `Result`
+2. **Use typed accessors**: Prefer `get_int()` over `get()` when you know the type
+3. **Register handlers early**: Register all handlers before parsing
+4. **Use categories for organization**: Group related settings in categories
+5. **Provide defaults**: Use `unwrap_or()` for optional settings
+6. **Check key existence**: Use `has()` before accessing optional keys
+7. **Use Hyprland feature for Hyprland configs**: Less boilerplate, more type safety
+
+## Common Pitfalls
+
+1. **Forgetting to register handlers**: Handlers must be registered before parsing
+2. **Wrong key paths**: Use colons to separate category levels: `category:key`
+3. **Type mismatches**: Use the correct `get_*` method for the value type
+4. **Circular variables**: Ensure no variable references form a cycle
+5. **Handler vs assignment**: Single-identifier assignments are checked as potential handlers
+
+## License
+
+Dual-licensed under MIT OR Apache-2.0.
+
+## Resources
+
+- **Crate**: https://crates.io/crates/hyprlang
+- **Repository**: https://github.com/spinualexandru/hyprlang-rs
+- **Original Hyprlang**: https://github.com/hyprwm/hyprlang
+- **Hyprland**: https://hyprland.org/

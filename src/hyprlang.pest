@@ -1,0 +1,118 @@
+// Hyprlang Grammar for pest parser
+// Main configuration file parsing
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE = _{ "\r\n" | "\n" | "\r" }
+COMMENT = _{ comment_single | comment_double }
+comment_single = @{ "#" ~ (!("##" | NEWLINE) ~ ANY)* }
+comment_double = @{ "##" ~ (!NEWLINE ~ ANY)* }
+
+// Top-level grammar
+file = { SOI ~ (NEWLINE* ~ statement ~ NEWLINE*)* ~ EOI }
+
+statement = _{
+    comment_directive |
+    directive |
+    variable_def |
+    category_block |
+    special_category_block |
+    assignment
+}
+
+// Comment directives: # hyprlang if/endif/noerror
+comment_directive = {
+    "#" ~ "hyprlang" ~ directive_type ~ directive_args?
+}
+
+directive_type = { "if" | "endif" | "noerror" }
+directive_args = { (!("\n" | "\r") ~ ANY)+ }
+
+// Source directive: source = ./file.conf
+directive = { "source" ~ "=" ~ value }
+
+// Variables: $VAR = value
+variable_def = { "$" ~ ident ~ "=" ~ value }
+
+// Assignments: key = value (value can be empty)
+assignment = { key_path ~ "=" ~ value? }
+
+// Handler calls: keyword [flags] = value
+handler_call = { ident ~ flags? ~ "=" ~ value }
+flags = { ident }
+
+// Categories: category { ... }
+category_block = { ident ~ "{" ~ (NEWLINE* ~ statement ~ NEWLINE*)* ~ "}" }
+
+// Special categories: category[key] { ... } or category { ... }
+special_category_block = { ident ~ category_key? ~ "{" ~ (NEWLINE* ~ statement ~ NEWLINE*)* ~ "}" }
+category_key = { "[" ~ ident ~ "]" }
+
+// Key paths: a:b:c
+key_path = { ident ~ (":" ~ ident)* }
+
+// Values
+value = { multiline_value | single_value }
+
+multiline_value = { single_value ~ ("\\" ~ NEWLINE ~ single_value)+ }
+
+single_value = {
+    expression |
+    string_value
+}
+
+// Expressions: {{expr}}
+expression = { "{{" ~ expr ~ "}}" }
+
+expr = { term ~ (expr_op ~ term)* }
+term = { number | "(" ~ expr ~ ")" | ident }
+expr_op = { "+" | "-" | "*" | "/" }
+
+// Variable references: $VAR
+variable_ref = { "$" ~ ident }
+
+// Colors: rgba(...) or rgb(...) or hex
+color = { rgba_func | rgb_func | hex_color }
+
+rgba_func = {
+    "rgba" ~ "(" ~ (
+        (hex_digits ~ ")") |
+        (number ~ "," ~ number ~ "," ~ number ~ "," ~ number ~ ")")
+    )
+}
+
+rgb_func = {
+    "rgb" ~ "(" ~ number ~ "," ~ number ~ "," ~ number ~ ")"
+}
+
+hex_color = @{ "0x" ~ hex_color_digits }
+hex_color_digits = @{ ASCII_HEX_DIGIT{6,8} }
+hex_digits = @{ (ASCII_HEX_DIGIT)+ }
+
+// Vec2: x, y (with optional parentheses)
+vec2 = { "(" ~ number ~ "," ~ number ~ ")" | number ~ "," ~ number }
+
+// Numbers: int, float, hex
+number = @{
+    hex_int |
+    float |
+    int
+}
+
+hex_int = @{ "0x" ~ hex_digits }
+float = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+int = @{ "-"? ~ ASCII_DIGIT+ }
+
+// Boolean (must be followed by whitespace or end of line, not other characters)
+boolean = @{ ("true" | "false" | "on" | "off" | "yes" | "no") ~ &(WHITESPACE | NEWLINE | "#" | EOI) }
+
+// Strings
+string_value = @{
+    quoted_string |
+    unquoted_string
+}
+
+quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+unquoted_string = @{ (!(NEWLINE | "#" | "\\") ~ ANY)+ }
+
+// Identifiers (allow dots for things like col.active_border)
+ident = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }
