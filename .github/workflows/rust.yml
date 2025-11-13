@@ -35,7 +35,7 @@ jobs:
         run: cargo check --no-default-features --features mutation
       - name: Cargo check (hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
-        run: cargo check --no-default-features --features hyprland mutation
+        run: cargo check --no-default-features --features hyprland,mutation
       - name: Cargo check (mutation)
         if: ${{ matrix.feature == 'mutation' }}
         run: cargo check --no-default-features --features mutation
@@ -45,7 +45,7 @@ jobs:
         run: cargo test mutation --no-default-features --features mutation
       - name: Cargo test (hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
-        run: cargo test --no-default-features --features hyprland mutation
+        run: cargo test --no-default-features --features hyprland,mutation
       - name: Cargo test (mutation)
         if: ${{ matrix.feature == 'mutation' }}
         run: cargo test --no-default-features --features mutation
@@ -55,7 +55,7 @@ jobs:
         run: cargo build --release --no-default-features --features mutation
       - name: Cargo build (release, hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
-        run: cargo build --release --no-default-features --features hyprland
+        run: cargo build --release --no-default-features --features,hyprland
       - name: Cargo build (release, mutation)
         if: ${{ matrix.feature == 'mutation' }}
         run: cargo build --release --no-default-features --features mutation
