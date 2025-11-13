@@ -55,7 +55,7 @@ jobs:
         run: cargo build --release --no-default-features --features mutation
       - name: Cargo build (release, hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
-        run: cargo build --release --no-default-features --features,hyprland
+        run: cargo build --release --no-default-features --features mutation,hyprland
       - name: Cargo build (release, mutation)
         if: ${{ matrix.feature == 'mutation' }}
         run: cargo build --release --no-default-features --features mutation
