@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        feature: [default, hyprland]
+        feature: [default, hyprland, mutation]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -36,6 +36,9 @@ jobs:
       - name: Cargo check (hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
         run: cargo check --no-default-features --features hyprland
+      - name: Cargo check (mutation)
+        if: ${{ matrix.feature == 'mutation' }}
+        run: cargo check --no-default-features --features mutation
       # cargo test
       - name: Cargo test (default)
         if: ${{ matrix.feature == 'default' }}
@@ -43,6 +46,9 @@ jobs:
       - name: Cargo test (hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
         run: cargo test --no-default-features --features hyprland
+      - name: Cargo test (mutation)
+        if: ${{ matrix.feature == 'mutation' }}
+        run: cargo test --no-default-features --features mutation
       # cargo build
       - name: Cargo build (release, default)
         if: ${{ matrix.feature == 'default' }}
@@ -50,3 +56,6 @@ jobs:
       - name: Cargo build (release, hyprland)
         if: ${{ matrix.feature == 'hyprland' }}
         run: cargo build --release --no-default-features --features hyprland
+      - name: Cargo build (release, mutation)
+        if: ${{ matrix.feature == 'mutation' }}
+        run: cargo build --release --no-default-features --features mutation
