@@ -534,6 +534,12 @@ println!("Mouse sensitivity: {:?}", mouse.get("sensitivity"));
 
 ### Source Directive
 
+```hyprlang
+ # .colors.conf
+ 
+ $borderSize = 3
+```
+
 ```rust
 use hyprlang::{Config, ConfigOptions};
 use std::path::PathBuf;
@@ -548,7 +554,7 @@ config.parse(r#"
     source = ./colors.conf
 
     general {
-        border_size = 2
+        border_size = $borderSize
     }
 "#)?;
 ```
