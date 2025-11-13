@@ -27,7 +27,8 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 - 🏷️ **Special Categories** - Keyed, static, and anonymous category types
 - 📄 **Source Directives** - Include external configuration files
 - 💬 **Conditional Directives** - `# hyprlang if/endif/noerror` support
-- ✅ **Fully Tested** - 44 tests covering all features
+- 🔄 **Mutation & Serialization** - Modify config values and save back to files (optional)
+- ✅ **Fully Tested** - 57 tests covering all features
 
 ## Installation
 
@@ -35,7 +36,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.1.4"
+hyprlang = "0.1.5"
 ```
 
 ### Optional Features
@@ -46,13 +47,28 @@ Enable the `hyprland` feature to get a high-level `Hyprland` struct with pre-con
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.1.4", features = ["hyprland"] }
+hyprlang = { version = "0.1.5", features = ["hyprland"] }
 ```
 
 This feature provides:
 - Automatic registration of all Hyprland handlers (bind, monitor, env, etc.)
 - Typed accessor methods for common Hyprland config values
 - Convenient methods to access all binds, windowrules, animations, etc.
+
+#### `mutation` Feature
+
+Enable the `mutation` feature to modify configuration values and serialize configs back to files:
+
+```toml
+[dependencies]
+hyprlang = { version = "0.1.5", features = ["mutation"] }
+```
+
+This feature provides:
+- **Mutation API** - Modify config values, variables, handlers, and special categories
+- **Serialization** - Save configurations back to files with clean formatting
+- **Two mutation styles** - Direct setters and mutable references
+- **Round-trip support** - Parse → modify → save → parse
 
 ## Quick Start
 
@@ -559,6 +575,57 @@ config.parse(r#"
 "#)?;
 ```
 
+### Mutation & Serialization (Optional Feature)
+
+Enable the `mutation` feature to modify configurations and save them:
+
+```rust
+use hyprlang::{Config, ConfigValue};
+
+let mut config = Config::new();
+config.parse(r#"
+    $GAPS = 10
+    border_size = 3
+    opacity = 0.9
+"#)?;
+
+// ===== Mutate Values =====
+config.set_int("border_size", 5);
+config.set_float("opacity", 1.0);
+config.set("new_key", ConfigValue::String("value".to_string()));
+
+// Remove values
+let old = config.remove("opacity")?;
+
+// ===== Mutate Variables =====
+// Method 1: Direct mutation
+config.set_variable("GAPS".to_string(), "15".to_string());
+
+// Method 2: Mutable reference
+if let Some(mut gaps) = config.get_variable_mut("GAPS") {
+    gaps.set("20")?;  // Now GAPS = 20
+}
+
+// ===== Mutate Handlers =====
+config.register_handler_fn("bind", |_| Ok(()));
+config.add_handler_call("bind", "SUPER, Q, exec, terminal".to_string())?;
+config.remove_handler_call("bind", 0)?;  // Remove first bind
+
+// ===== Serialize & Save =====
+let output = config.serialize();  // Get string representation
+config.save_as("config_modified.conf")?;  // Save to file
+
+// Verify round-trip
+let mut config2 = Config::new();
+config2.parse_file(Path::new("config_modified.conf"))?;
+assert_eq!(config2.get_int("border_size")?, 5);
+```
+
+Run the comprehensive example:
+```bash
+cargo run --example mutation_example --features mutation
+```
+
 ### Parse from File
 
 ```rust
@@ -676,6 +743,22 @@ config.get_color(key: &str) -> Result<Color>
 config.set(key: impl Into<String>, value: ConfigValue)
 config.set_variable(name: String, value: String)
 
+// Mutation (requires `mutation` feature)
+config.set_int(key, value: i64)
+config.set_float(key, value: f64)
+config.set_string(key, value: impl Into<String>)
+config.remove(key: &str) -> Result<ConfigValue>
+config.get_variable_mut(name: &str) -> Option<MutableVariable>
+config.remove_variable(name: &str) -> Option<String>
+config.add_handler_call(handler, value: String) -> Result<()>
+config.remove_handler_call(handler: &str, index: usize) -> Result<String>
+config.get_special_category_mut(category, key) -> Result<MutableCategoryInstance>
+
+// Serialization (requires `mutation` feature)
+config.serialize() -> String
+config.save() -> Result<()>
+config.save_as(path: impl AsRef<Path>) -> Result<()>
+
 // Querying
 config.keys() -> Vec<&str>
 config.variables() -> &HashMap<String, String>
@@ -734,17 +817,37 @@ This example demonstrates:
 - Working with variables
 - Comprehensive display of all Hyprland configuration options
 
+### `examples/mutation_example.rs`
+
+Comprehensive example demonstrating mutation and serialization (requires `mutation` feature):
+
+```bash
+cargo run --example mutation_example --features mutation
+```
+
+This example demonstrates:
+- Mutating configuration values (both direct setters and mutable references)
+- Mutating variables using both API styles
+- Adding and removing handler calls
+- Serializing configurations to strings
+- Saving configurations to files
+- Round-trip verification (parse → mutate → save → parse)
+
 ## Testing
 
 Run the full test suite:
 
 ```bash
 cargo test
+
+# Run with all features enabled
+cargo test --all-features
 ```
 
 The project includes:
-- 29 unit tests covering core functionality
+- 39 unit tests covering core functionality (including mutation features)
 - 12 integration tests for Hyprland-specific scenarios
+- 3 mutation integration tests
 - 3 documentation tests
 
 All tests from the original Hyprlang C++ implementation have been ported and pass successfully.

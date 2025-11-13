@@ -17,6 +17,32 @@
 //! - **Multiline values**: Line continuation support
 //! - **Source directives**: Include external configuration files
 //! - **Dynamic parsing**: Parse and update configuration at runtime
+//! - **Mutation & Serialization** (optional): Modify config values and save back to files
+//!
+//! ## Optional Features
+//!
+//! ### `mutation` Feature
+//!
+//! Enable the `mutation` feature to unlock configuration modification and serialization capabilities:
+//!
+//! ```toml
+//! [dependencies]
+//! hyprlang = { version = "0.1.5", features = ["mutation"] }
+//! ```
+//!
+//! This provides:
+//! - **Value mutations**: [`Config::set_int`], [`Config::set_float`], [`Config::set_string`], [`Config::remove`]
+//! - **Variable mutations**: [`Config::set_variable`], [`Config::get_variable_mut`], [`Config::remove_variable`]
+//! - **Handler mutations**: [`Config::add_handler_call`], [`Config::remove_handler_call`]
+//! - **Category mutations**: [`Config::get_special_category_mut`], [`Config::remove_special_category_instance`]
+//! - **Serialization**: [`Config::serialize`], [`Config::save`], [`Config::save_as`]
+//!
+//! See the mutation API documentation on [`MutableVariable`] and [`MutableCategoryInstance`] for detailed examples.
+//!
+//! ### `hyprland` Feature
+//!
+//! The `hyprland` feature provides a high-level API with pre-configured Hyprland handlers and typed accessors.
+//! See the [`Hyprland`] struct documentation for details.
 //!
 //! ## Example
 //!
@@ -117,6 +143,12 @@ mod variables;
 #[cfg(feature = "hyprland")]
 mod hyprland;
 
+#[cfg(feature = "mutation")]
+mod document;
+
+#[cfg(feature = "mutation")]
+mod mutation;
+
 // Public API exports
 pub use config::{Config, ConfigOptions};
 pub use error::{ConfigError, ParseResult};
@@ -133,6 +165,12 @@ pub use variables::VariableManager;
 // Feature-gated exports
 #[cfg(feature = "hyprland")]
 pub use hyprland::Hyprland;
+
+#[cfg(feature = "mutation")]
+pub use document::{ConfigDocument, DocumentNode, NodeLocation, NodeType};
+
+#[cfg(feature = "mutation")]
+pub use mutation::{MutableCategoryInstance, MutableVariable};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

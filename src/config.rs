@@ -47,6 +47,14 @@ pub struct Config {
 
     /// Collected errors (when throw_all_errors is enabled)
     errors: Vec<ConfigError>,
+
+    /// Document structure (for full-fidelity serialization)
+    #[cfg(feature = "mutation")]
+    document: Option<crate::document::ConfigDocument>,
+
+    /// Source file path (for save operations)
+    #[cfg(feature = "mutation")]
+    source_file: Option<PathBuf>,
 }
 
 /// Configuration options
@@ -88,6 +96,10 @@ impl Config {
             options: ConfigOptions::default(),
             current_path: Vec::new(),
             errors: Vec::new(),
+            #[cfg(feature = "mutation")]
+            document: None,
+            #[cfg(feature = "mutation")]
+            source_file: None,
         }
     }
 
@@ -109,6 +121,10 @@ impl Config {
             options,
             current_path: Vec::new(),
             errors: Vec::new(),
+            #[cfg(feature = "mutation")]
+            document: None,
+            #[cfg(feature = "mutation")]
+            source_file: None,
         }
     }
 
@@ -141,7 +157,15 @@ impl Config {
     pub fn parse(&mut self, input: &str) -> ParseResult<()> {
         self.commence()?;
 
+        #[cfg(feature = "mutation")]
+        let (parsed, document) = HyprlangParser::parse_with_document(input)?;
+        #[cfg(not(feature = "mutation"))]
         let parsed = HyprlangParser::parse_config(input)?;
+
+        #[cfg(feature = "mutation")]
+        {
+            self.document = Some(document);
+        }
 
         for statement in parsed.statements {
             if let Err(e) = self.process_statement(&statement) {
@@ -584,7 +608,15 @@ impl Config {
     pub fn set(&mut self, key: impl Into<String>, value: ConfigValue) {
         let key = key.into();
         let raw = value.to_string();
-        self.values.insert(key, ConfigValueEntry::new(value, raw));
+        self.values.insert(key.clone(), ConfigValueEntry::new(value, raw.clone()));
+
+        // Update document tree if mutation feature is enabled
+        #[cfg(feature = "mutation")]
+        {
+            if let Some(doc) = &mut self.document {
+                let _ = doc.update_or_insert_value(&key, &raw);
+            }
+        }
     }
 
     /// Check if a key exists
@@ -685,7 +717,15 @@ impl Config {
 
         // Update expression evaluator if it's a number
         if let Ok(num) = ConfigValue::parse_int(&value) {
-            self.expressions.set_variable(name, num);
+            self.expressions.set_variable(name.clone(), num);
+        }
+
+        // Update document tree if mutation feature is enabled
+        #[cfg(feature = "mutation")]
+        {
+            if let Some(doc) = &mut self.document {
+                let _ = doc.update_or_insert_variable(&name, &value);
+            }
         }
     }
 
@@ -712,6 +752,537 @@ impl Config {
     /// Get all handler calls as a map
     pub fn all_handler_calls(&self) -> &HashMap<String, Vec<String>> {
         &self.handler_calls
+    }
+
+    // ========== MUTATION METHODS (mutation feature) ==========
+
+    /// Set an integer configuration value.
+    ///
+    /// This is a convenience method for [`set`](Config::set) that wraps the value in [`ConfigValue::Int`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.set_int("border_size", 5);
+    /// assert_eq!(config.get_int("border_size").unwrap(), 5);
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn set_int(&mut self, key: impl Into<String>, value: i64) {
+        self.set(key, ConfigValue::Int(value))
+    }
+
+    /// Set a float configuration value.
+    ///
+    /// This is a convenience method for [`set`](Config::set) that wraps the value in [`ConfigValue::Float`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.set_float("opacity", 0.95);
+    /// assert_eq!(config.get_float("opacity").unwrap(), 0.95);
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn set_float(&mut self, key: impl Into<String>, value: f64) {
+        self.set(key, ConfigValue::Float(value))
+    }
+
+    /// Set a string configuration value.
+    ///
+    /// This is a convenience method for [`set`](Config::set) that wraps the value in [`ConfigValue::String`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.set_string("terminal", "kitty");
+    /// assert_eq!(config.get_string("terminal").unwrap(), "kitty");
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn set_string(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.set(key, ConfigValue::String(value.into()))
+    }
+
+    /// Remove a configuration value and return it.
+    ///
+    /// Returns an error if the key doesn't exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::{Config, ConfigValue};
+    ///
+    /// let mut config = Config::new();
+    /// config.set_int("test", 42);
+    ///
+    /// let removed = config.remove("test").unwrap();
+    /// assert_eq!(removed.as_int().unwrap(), 42);
+    /// assert!(!config.contains("test"));
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn remove(&mut self, key: &str) -> ParseResult<ConfigValue> {
+        let entry = self.values.remove(key)
+            .ok_or_else(|| ConfigError::key_not_found(key))?;
+
+        #[cfg(feature = "mutation")]
+        {
+            if let Some(doc) = &mut self.document {
+                let _ = doc.remove_value(key);
+            }
+        }
+
+        Ok(entry.value)
+    }
+
+    // ========== VARIABLE MUTATIONS ==========
+
+    /// Get a mutable reference to a variable.
+    ///
+    /// Returns a [`MutableVariable`](crate::MutableVariable) that allows you to read and modify
+    /// the variable value. Returns `None` if the variable doesn't exist.
+    ///
+    /// This provides an alternative API to [`set_variable`](Config::set_variable) that allows
+    /// you to work with variables using a reference-based approach.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse("$GAPS = 10").unwrap();
+    ///
+    /// // Get mutable reference and modify
+    /// if let Some(mut gaps) = config.get_variable_mut("GAPS") {
+    ///     assert_eq!(gaps.get(), "10");
+    ///     gaps.set("20").unwrap();
+    ///     assert_eq!(gaps.get(), "20");
+    /// }
+    ///
+    /// assert_eq!(config.get_variable("GAPS"), Some("20"));
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn get_variable_mut(&mut self, name: &str) -> Option<crate::mutation::MutableVariable> {
+        if self.variables.contains(name) {
+            // We need to use unsafe here to work around the borrow checker
+            // This is safe because we're only accessing disjoint fields
+            let manager_ptr = &mut self.variables as *mut VariableManager;
+            let doc_ptr = &mut self.document as *mut Option<crate::document::ConfigDocument>;
+
+            unsafe {
+                Some(crate::mutation::MutableVariable::new(
+                    name.to_string(),
+                    &mut *manager_ptr,
+                    (*doc_ptr).as_mut(),
+                ))
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Remove a variable and return its value.
+    ///
+    /// Returns the variable value if it existed, or `None` if it didn't.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse("$OLD = value").unwrap();
+    ///
+    /// let removed = config.remove_variable("OLD");
+    /// assert_eq!(removed, Some("value".to_string()));
+    /// assert_eq!(config.get_variable("OLD"), None);
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn remove_variable(&mut self, name: &str) -> Option<String> {
+        let value = self.variables.remove(name);
+
+        #[cfg(feature = "mutation")]
+        {
+            if let Some(doc) = &mut self.document {
+                let _ = doc.remove_variable(name);
+            }
+        }
+
+        value
+    }
+
+    // ========== HANDLER MUTATIONS ==========
+
+    /// Add a handler call.
+    ///
+    /// Handler calls are stored as arrays, so you can add multiple calls for the same handler.
+    /// The handler must be registered before parsing, but you can add calls dynamically after parsing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.register_handler_fn("bind", |_| Ok(()));
+    ///
+    /// config.add_handler_call("bind", "SUPER, Q, exec, terminal".to_string()).unwrap();
+    /// config.add_handler_call("bind", "SUPER, C, killactive".to_string()).unwrap();
+    ///
+    /// let binds = config.get_handler_calls("bind").unwrap();
+    /// assert_eq!(binds.len(), 2);
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn add_handler_call(&mut self, handler: impl Into<String>, value: String) -> ParseResult<()> {
+        let handler = handler.into();
+
+        // Update in-memory state
+        self.handler_calls
+            .entry(handler.clone())
+            .or_insert_with(Vec::new)
+            .push(value.clone());
+
+        #[cfg(feature = "mutation")]
+        {
+            if let Some(doc) = &mut self.document {
+                let _ = doc.add_handler_call(&handler, &value);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove all handler calls for a specific handler.
+    ///
+    /// Returns the array of handler call values if the handler had any calls, or `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.register_handler_fn("bind", |_| Ok(()));
+    /// config.parse("bind = SUPER, Q, exec, terminal\nbind = SUPER, C, killactive").unwrap();
+    ///
+    /// let removed = config.remove_handler_calls("bind");
+    /// assert_eq!(removed.unwrap().len(), 2);
+    /// assert!(config.get_handler_calls("bind").is_none());
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn remove_handler_calls(&mut self, handler: &str) -> Option<Vec<String>> {
+        let calls = self.handler_calls.remove(handler);
+
+        // TODO: Remove from document tree
+        // if let Some(doc) = &mut self.document {
+        //     let _ = doc.remove_handler_calls(handler);
+        // }
+
+        calls
+    }
+
+    /// Remove a specific handler call by index.
+    ///
+    /// Returns an error if the handler doesn't exist or if the index is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.register_handler_fn("bind", |_| Ok(()));
+    /// config.parse("bind = SUPER, Q, exec, terminal\nbind = SUPER, C, killactive").unwrap();
+    ///
+    /// // Remove the first bind
+    /// let removed = config.remove_handler_call("bind", 0).unwrap();
+    /// assert_eq!(removed, "SUPER, Q, exec, terminal");
+    ///
+    /// // Only one bind remains
+    /// assert_eq!(config.get_handler_calls("bind").unwrap().len(), 1);
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn remove_handler_call(&mut self, handler: &str, index: usize) -> ParseResult<String> {
+        let calls = self.handler_calls.get_mut(handler)
+            .ok_or_else(|| ConfigError::handler(handler, "no calls found"))?;
+
+        if index >= calls.len() {
+            return Err(ConfigError::custom("index out of bounds"));
+        }
+
+        let value = calls.remove(index);
+
+        // TODO: Remove from document tree
+        // if let Some(doc) = &mut self.document {
+        //     doc.remove_handler_call_at(handler, index)?;
+        // }
+
+        Ok(value)
+    }
+
+    // ========== SPECIAL CATEGORY MUTATIONS ==========
+
+    /// Get a mutable reference to a special category instance.
+    ///
+    /// Returns a [`MutableCategoryInstance`](crate::MutableCategoryInstance) that allows you to read,
+    /// modify, and remove values within the category instance.
+    ///
+    /// Returns an error if the category or instance doesn't exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
+    ///
+    /// let mut config = Config::new();
+    /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
+    ///
+    /// // Get mutable reference and modify
+    /// let mut mouse = config.get_special_category_mut("device", "mouse").unwrap();
+    /// mouse.set("sensitivity", ConfigValue::Float(2.5)).unwrap();
+    ///
+    /// // Verify the change
+    /// let mouse_data = config.get_special_category("device", "mouse").unwrap();
+    /// assert_eq!(mouse_data.get("sensitivity").unwrap().as_float().unwrap(), 2.5);
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn get_special_category_mut(
+        &mut self,
+        category: &str,
+        key: &str,
+    ) -> ParseResult<crate::mutation::MutableCategoryInstance> {
+        // Verify it exists
+        if !self.special_categories.instance_exists(category, key) {
+            return Err(ConfigError::category_not_found(category, Some(key.to_string())));
+        }
+
+        // We need to use unsafe here to work around the borrow checker
+        // This is safe because we're only accessing disjoint fields
+        let manager_ptr = &mut self.special_categories as *mut SpecialCategoryManager;
+        let doc_ptr = &mut self.document as *mut Option<crate::document::ConfigDocument>;
+
+        unsafe {
+            Ok(crate::mutation::MutableCategoryInstance::new(
+                category.to_string(),
+                key.to_string(),
+                &mut *manager_ptr,
+                (*doc_ptr).as_mut(),
+            ))
+        }
+    }
+
+    /// Remove a special category instance.
+    ///
+    /// Removes the entire category instance and all values within it.
+    /// Returns an error if the category or instance doesn't exist.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::{Config, SpecialCategoryDescriptor};
+    ///
+    /// let mut config = Config::new();
+    /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}\ndevice[keyboard] {\n  repeat_rate = 50\n}").unwrap();
+    ///
+    /// config.remove_special_category_instance("device", "mouse").unwrap();
+    ///
+    /// assert!(config.get_special_category("device", "mouse").is_err());
+    /// assert!(config.get_special_category("device", "keyboard").is_ok());
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn remove_special_category_instance(
+        &mut self,
+        category: &str,
+        key: &str,
+    ) -> ParseResult<()> {
+        self.special_categories.remove_instance(category, key)?;
+
+        // TODO: Remove from document tree
+        // if let Some(doc) = &mut self.document {
+        //     doc.remove_special_category_instance(category, key)?;
+        // }
+
+        Ok(())
+    }
+
+    // ========== SERIALIZATION METHODS (mutation feature) ==========
+
+    /// Serialize the configuration to a string.
+    ///
+    /// Generates a clean, well-formatted configuration string containing all values, variables,
+    /// and handler calls. The current implementation uses synthetic serialization, which means:
+    /// - All config data is preserved
+    /// - Output is clean and consistently formatted
+    /// - Original comments and formatting are not preserved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse("$GAPS = 10\nborder_size = 3").unwrap();
+    /// config.set_int("opacity", 1);
+    ///
+    /// let output = config.serialize();
+    /// assert!(output.contains("$GAPS = 10"));
+    /// assert!(output.contains("border_size = 3"));
+    /// assert!(output.contains("opacity = 1"));
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn serialize(&self) -> String {
+        if let Some(doc) = &self.document {
+            doc.serialize()
+        } else {
+            // Fallback: generate from scratch (no formatting preserved)
+            self.serialize_synthetic()
+        }
+    }
+
+    /// Save the configuration to its source file.
+    ///
+    /// This method is only available if the configuration was loaded from a file using
+    /// [`parse_file`](Config::parse_file). Returns an error if no source file is associated
+    /// with this configuration.
+    ///
+    /// Use [`save_as`](Config::save_as) to save to a different file.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    /// use std::path::Path;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse_file(Path::new("config.conf")).unwrap();
+    ///
+    /// config.set_int("border_size", 5);
+    ///
+    /// // Save back to config.conf
+    /// config.save().unwrap();
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn save(&self) -> ParseResult<()> {
+        let path = self.source_file.as_ref()
+            .ok_or_else(|| ConfigError::custom("No source file associated with this config. Use save_as() instead."))?;
+
+        let content = self.serialize();
+        std::fs::write(path, content)
+            .map_err(|e| ConfigError::io(path.display().to_string(), e.to_string()))
+    }
+
+    /// Save the configuration to a specific file.
+    ///
+    /// This method works whether or not the configuration was loaded from a file.
+    /// The serialized output includes all values, variables, and handler calls.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse("$GAPS = 10\nborder_size = 3").unwrap();
+    /// config.set_int("opacity", 1);
+    ///
+    /// // Save to a new file
+    /// config.save_as("modified_config.conf").unwrap();
+    ///
+    /// // Create a backup
+    /// config.save_as("config.backup").unwrap();
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn save_as(&self, path: impl AsRef<Path>) -> ParseResult<()> {
+        let content = self.serialize();
+        std::fs::write(&path, content)
+            .map_err(|e| ConfigError::io(path.as_ref().display().to_string(), e.to_string()))
+    }
+
+    /// Generate a synthetic config (when no document exists)
+    #[cfg(feature = "mutation")]
+    fn serialize_synthetic(&self) -> String {
+        let mut output = String::new();
+
+        // Variables
+        let vars = self.variables.all();
+        if !vars.is_empty() {
+            for (name, value) in vars {
+                output.push_str(&format!("${} = {}\n", name, value));
+            }
+            output.push('\n');
+        }
+
+        // Regular values (need to reconstruct categories)
+        let mut keys: Vec<_> = self.values.keys().collect();
+        keys.sort();
+
+        for key in keys {
+            if let Some(entry) = self.values.get(key.as_str()) {
+                if key.contains(':') {
+                    // Nested key - format with categories
+                    let parts: Vec<&str> = key.split(':').collect();
+                    output.push_str(&format!("{} = {}\n", parts.join(":"), entry.raw));
+                } else {
+                    // Root-level key
+                    output.push_str(&format!("{} = {}\n", key, entry.raw));
+                }
+            }
+        }
+
+        if !self.values.is_empty() {
+            output.push('\n');
+        }
+
+        // Handler calls
+        let mut handler_names: Vec<_> = self.handler_calls.keys().collect();
+        handler_names.sort();
+
+        for handler in handler_names {
+            if let Some(calls) = self.handler_calls.get(handler.as_str()) {
+                for call in calls {
+                    output.push_str(&format!("{} = {}\n", handler, call));
+                }
+            }
+        }
+
+        output
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "hyprlang"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["Alex Spinu"]
 description = "A scripting language interpreter and parser for Hyprlang and Hyprland configuration files."
@@ -14,6 +14,7 @@ license = "MIT OR Apache-2.0"
 [features]
 default = []
 hyprland = []
+mutation = []
 
 [dependencies]
 pest = { version = "2.8.3", features = ["pretty-print"] }
