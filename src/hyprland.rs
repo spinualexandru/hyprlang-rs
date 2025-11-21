@@ -357,10 +357,59 @@
 //! [`Config`]: crate::Config
 
 use crate::config::{Config, ConfigOptions};
-use crate::error::ParseResult;
+use crate::error::{ConfigError, ParseResult};
 use crate::special_categories::SpecialCategoryDescriptor;
 use crate::types::{Color, ConfigValue};
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Wrapper around a special category instance with convenient value accessors
+pub struct RuleInstance<'a> {
+    values: HashMap<String, &'a ConfigValue>,
+}
+
+impl<'a> RuleInstance<'a> {
+    fn new(values: HashMap<String, &'a ConfigValue>) -> Self {
+        Self { values }
+    }
+
+    /// Get a value by key
+    pub fn get(&self, key: &str) -> ParseResult<&ConfigValue> {
+        self.values.get(key).copied().ok_or_else(|| ConfigError::key_not_found(key))
+    }
+
+    /// Get a string value
+    pub fn get_string(&self, key: &str) -> ParseResult<String> {
+        match self.get(key)? {
+            ConfigValue::String(s) => Ok(s.clone()),
+            v => Err(ConfigError::type_error(key, "String", v.type_name())),
+        }
+    }
+
+    /// Get an integer value
+    pub fn get_int(&self, key: &str) -> ParseResult<i64> {
+        match self.get(key)? {
+            ConfigValue::Int(i) => Ok(*i),
+            v => Err(ConfigError::type_error(key, "Int", v.type_name())),
+        }
+    }
+
+    /// Get a float value
+    pub fn get_float(&self, key: &str) -> ParseResult<f64> {
+        match self.get(key)? {
+            ConfigValue::Float(f) => Ok(*f),
+            v => Err(ConfigError::type_error(key, "Float", v.type_name())),
+        }
+    }
+
+    /// Get a color value
+    pub fn get_color(&self, key: &str) -> ParseResult<Color> {
+        match self.get(key)? {
+            ConfigValue::Color(c) => Ok(c.clone()),
+            v => Err(ConfigError::type_error(key, "Color", v.type_name())),
+        }
+    }
+}
 
 /// High-level wrapper for Hyprland configuration
 ///
@@ -474,6 +523,152 @@ impl Hyprland {
         config.register_special_category(
             SpecialCategoryDescriptor::keyed("monitor", "name")
         );
+
+        // Windowrule v3: windowrule { name = ... }
+        config.register_special_category(
+            SpecialCategoryDescriptor::keyed("windowrule", "name")
+        );
+        Self::register_windowrule_properties(config);
+
+        // Layerrule v2: layerrule { name = ... }
+        config.register_special_category(
+            SpecialCategoryDescriptor::keyed("layerrule", "name")
+        );
+        Self::register_layerrule_properties(config);
+    }
+
+    /// Register all windowrule match and effect properties
+    /// Based on Hyprland's Rule.hpp and WindowRuleEffectContainer.hpp
+    fn register_windowrule_properties(config: &mut Config) {
+        // Enable property (default: 1)
+        config.register_special_category_value("windowrule", "enable", ConfigValue::Int(1));
+
+        // Match properties (19 total from Rule.hpp enum eRuleProperty)
+        let match_props = [
+            "class",                      // Window class (regex)
+            "title",                      // Window title (regex)
+            "initial_class",              // Initial class on creation
+            "initial_title",              // Initial title on creation
+            "floating",                   // Is floating (bool)
+            "tag",                        // Window tag
+            "xwayland",                   // Is XWayland (bool)
+            "fullscreen",                 // Is fullscreen (bool)
+            "pinned",                     // Is pinned (bool)
+            "focus",                      // Is focused (bool)
+            "group",                      // Is in group (bool)
+            "modal",                      // Is modal (bool)
+            "fullscreenstate_internal",   // Internal fullscreen state
+            "fullscreenstate_client",     // Client fullscreen state
+            "on_workspace",               // On specific workspace
+            "content",                    // Content type
+            "xdg_tag",                    // XDG tag
+            "namespace",                  // Namespace (for layer surfaces)
+            "exec_token",                 // Exec token
+        ];
+
+        for prop in match_props {
+            config.register_special_category_value(
+                "windowrule",
+                format!("match:{}", prop),
+                ConfigValue::String(String::new())
+            );
+        }
+
+        // Effect properties (60+ from WindowRuleEffectContainer.hpp)
+        // Note: Many properties have aliases (e.g., border_color / bordercolor)
+        let effect_props = [
+            // Static effects (applied once)
+            "float", "tile", "fullscreen", "maximize", "fullscreenstate",
+            "move", "size", "center", "pseudo",
+            "monitor", "workspace", "noinitialfocus", "pin",
+            "group", "suppressevent", "content", "noclosefor",
+
+            // Dynamic effects (continuously applied)
+            "rounding", "rounding_power", "persistent_size", "animation",
+            "border_color", "bordercolor",  // Aliases
+            "idle_inhibit", "idleinhibit",  // Aliases
+            "opacity",
+            "tag",
+            "max_size", "maxsize",  // Aliases
+            "min_size", "minsize",  // Aliases
+            "border_size", "bordersize",  // Aliases
+            "allows_input",
+            "dim_around",
+            "decorate",
+            "focus_on_activate",
+            "keep_aspect_ratio", "keepaspectratio",  // Aliases
+            "nearest_neighbor", "nearestneighbor",  // Aliases
+            "no_anim", "noanim",  // Aliases
+            "no_blur", "noblur",  // Aliases
+            "no_dim", "nodim",  // Aliases
+            "no_focus", "nofocus",  // Aliases
+            "no_follow_mouse", "nofollowmouse",  // Aliases
+            "no_max_size", "nomaxsize",  // Aliases
+            "no_shadow", "noshadow",  // Aliases
+            "no_shortcuts_inhibit", "noshortcutsinhibit",  // Aliases
+            "opaque",
+            "force_rgbx", "forcergbx",  // Aliases
+            "sync_fullscreen", "syncfullscreen",  // Aliases
+            "immediate",
+            "xray",
+            "render_unfocused", "renderunfocused",  // Aliases
+            "no_screen_share", "noscreenshare",  // Aliases
+            "no_vrr", "novrr",  // Aliases
+            "scroll_mouse", "scrollmouse",  // Aliases
+            "scroll_touchpad", "scrolltouchpad",  // Aliases
+            "stay_focused", "stayfocused",  // Aliases
+        ];
+
+        for prop in effect_props {
+            config.register_special_category_value(
+                "windowrule",
+                prop,
+                ConfigValue::String(String::new())
+            );
+        }
+    }
+
+    /// Register all layerrule properties
+    /// Based on Hyprland's LayerRule implementation
+    fn register_layerrule_properties(config: &mut Config) {
+        // Enable property (default: 1)
+        config.register_special_category_value("layerrule", "enable", ConfigValue::Int(1));
+
+        // Match properties for layer surfaces
+        let match_props = [
+            "namespace",   // Layer namespace
+            "address",     // Layer address
+            "class",       // Associated class
+            "title",       // Associated title
+            "monitor",     // Monitor name
+            "layer",       // Layer level (background, bottom, top, overlay)
+        ];
+
+        for prop in match_props {
+            config.register_special_category_value(
+                "layerrule",
+                format!("match:{}", prop),
+                ConfigValue::String(String::new())
+            );
+        }
+
+        // Effect properties for layer surfaces
+        let effect_props = [
+            "blur",           // Enable blur
+            "ignorealpha",    // Ignore alpha
+            "ignorezero",     // Ignore zero alpha
+            "animation",      // Animation style
+            "noanim",        // Disable animations
+            "xray",          // X-ray mode
+        ];
+
+        for prop in effect_props {
+            config.register_special_category_value(
+                "layerrule",
+                prop,
+                ConfigValue::String(String::new())
+            );
+        }
     }
 
     // ==================== General Config ====================
@@ -691,7 +886,15 @@ impl Hyprland {
             .unwrap_or_default()
     }
 
-    /// Get all windowrule definitions
+    /// Get all windowrule definitions (v1/v2 handler-based syntax, deprecated)
+    ///
+    /// This returns windowrule handler calls from old configs using:
+    /// ```conf
+    /// windowrule = float, ^(kitty)$
+    /// ```
+    ///
+    /// For new v3 syntax, use [`windowrule_names()`](Self::windowrule_names) and
+    /// [`get_windowrule()`](Self::get_windowrule) instead.
     pub fn all_windowrules(&self) -> Vec<&String> {
         self.config
             .get_handler_calls("windowrule")
@@ -699,7 +902,15 @@ impl Hyprland {
             .unwrap_or_default()
     }
 
-    /// Get all windowrulev2 definitions
+    /// Get all windowrulev2 definitions (v2 handler-based syntax, deprecated)
+    ///
+    /// This returns windowrulev2 handler calls from old configs using:
+    /// ```conf
+    /// windowrulev2 = float, class:^(kitty)$
+    /// ```
+    ///
+    /// For new v3 syntax, use [`windowrule_names()`](Self::windowrule_names) and
+    /// [`get_windowrule()`](Self::get_windowrule) instead.
     pub fn all_windowrulesv2(&self) -> Vec<&String> {
         self.config
             .get_handler_calls("windowrulev2")
@@ -707,12 +918,86 @@ impl Hyprland {
             .unwrap_or_default()
     }
 
-    /// Get all layerrule definitions
+    /// Get all windowrule names (v3 special category syntax)
+    ///
+    /// Returns the names of all windowrule blocks defined in the config:
+    /// ```conf
+    /// windowrule {
+    ///     name = my-float-rule
+    ///     match:class = ^(kitty)$
+    ///     float = true
+    /// }
+    /// ```
+    ///
+    /// Returns `vec!["my-float-rule"]`
+    pub fn windowrule_names(&self) -> Vec<String> {
+        self.config.list_special_category_keys("windowrule")
+    }
+
+    /// Get a specific windowrule by name (v3 special category syntax)
+    ///
+    /// Returns all properties of a windowrule block:
+    /// ```conf
+    /// windowrule {
+    ///     name = my-rule
+    ///     match:class = ^(kitty)$
+    ///     float = true
+    ///     size = 800 600
+    /// }
+    /// ```
+    ///
+    /// Access properties:
+    /// ```rust
+    /// # use hyprlang::{Hyprland, ConfigValue};
+    /// # let mut hypr = Hyprland::new();
+    /// # hypr.parse(r#"
+    /// # windowrule[my-rule] {
+    /// #     match:class = ^(kitty)$
+    /// #     float = yes_please
+    /// # }
+    /// # "#).unwrap();
+    /// let rule = hypr.get_windowrule("my-rule").unwrap();
+    /// let class_match = rule.get_string("match:class").unwrap();
+    /// let is_float = rule.get_string("float").unwrap();
+    /// ```
+    pub fn get_windowrule(&self, name: &str) -> ParseResult<RuleInstance<'_>> {
+        self.config.get_special_category("windowrule", name)
+            .map(RuleInstance::new)
+    }
+
+    /// Get all layerrule definitions (v1 handler-based syntax, deprecated)
+    ///
+    /// This returns layerrule handler calls from old configs.
+    ///
+    /// For new v2 syntax, use [`layerrule_names()`](Self::layerrule_names) and
+    /// [`get_layerrule()`](Self::get_layerrule) instead.
     pub fn all_layerrules(&self) -> Vec<&String> {
         self.config
             .get_handler_calls("layerrule")
             .map(|calls| calls.iter().collect())
             .unwrap_or_default()
+    }
+
+    /// Get all layerrule names (v2 special category syntax)
+    ///
+    /// Returns the names of all layerrule blocks defined in the config:
+    /// ```conf
+    /// layerrule {
+    ///     name = blur-waybar
+    ///     match:namespace = waybar
+    ///     blur = true
+    /// }
+    /// ```
+    ///
+    /// Returns `vec!["blur-waybar"]`
+    pub fn layerrule_names(&self) -> Vec<String> {
+        self.config.list_special_category_keys("layerrule")
+    }
+
+    /// Get a specific layerrule by name (v2 special category syntax)
+    pub fn get_layerrule(&self, name: &str) -> ParseResult<RuleInstance<'_>> {
+        self.config.get_special_category("layerrule", name)
+            .map(RuleInstance::new)
     }
 
     /// Get all workspace definitions

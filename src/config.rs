@@ -1,4 +1,5 @@
 use crate::error::{ConfigError, ParseResult};
+use crate::escaping::{process_escapes, restore_escaped_braces};
 use crate::expressions::ExpressionEvaluator;
 use crate::features::{DirectiveProcessor, MultilineProcessor, SourceResolver};
 use crate::handlers::{FunctionHandler, Handler, HandlerManager};
@@ -215,7 +216,11 @@ impl Config {
 
         match statement {
             Statement::VariableDef { name, value } => {
-                let expanded = self.variables.expand(value)?;
+                // Process escapes first, then expand variables
+                // Don't evaluate expressions here - they'll be evaluated when the variable is used
+                let escaped = process_escapes(value);
+                let expanded = self.variables.expand(&escaped)?;
+
                 self.variables.set(name.clone(), expanded.clone());
 
                 // Update expression evaluator if it's a number
@@ -227,8 +232,13 @@ impl Config {
             }
 
             Statement::Assignment { key, value } => {
+                // Check if we're inside a special category block
+                // Special category paths contain brackets like "windowrule[test]"
+                let in_special_category = self.current_path.iter().any(|p| p.contains('['));
+
                 // Check if this is a potential handler call (single identifier and registered handler)
-                let is_potential_handler = key.len() == 1;
+                // But NOT if we're inside a special category (properties there should be assignments)
+                let is_potential_handler = key.len() == 1 && !in_special_category;
                 let keyword = &key[0];
 
                 if is_potential_handler && self.handlers.has_handler(&self.current_path, keyword) {
@@ -423,14 +433,27 @@ impl Config {
             Value::Boolean(b) => Ok(ConfigValue::Int(if *b { 1 } else { 0 })),
 
             Value::String(s) => {
-                let expanded = self.variables.expand(s)?;
-                self.parse_string_value(&expanded)
+                // Process escapes first (converts escaped braces to placeholders)
+                let escaped = process_escapes(s);
+                // Expand variables
+                let expanded = self.variables.expand(&escaped)?;
+                // Evaluate expressions (placeholders won't be evaluated)
+                let with_exprs = self.evaluate_expressions_in_string(&expanded)?;
+                // Restore escaped braces from placeholders to literal {{}}
+                let final_value = restore_escaped_braces(&with_exprs);
+                self.parse_string_value(&final_value)
             }
 
             Value::Multiline(lines) => {
                 let joined = MultilineProcessor::join_lines(lines);
-                let expanded = self.variables.expand(&joined)?;
-                Ok(ConfigValue::String(expanded))
+                // Process escapes before variable expansion
+                let escaped = process_escapes(&joined);
+                let expanded = self.variables.expand(&escaped)?;
+                // Evaluate expressions
+                let with_exprs = self.evaluate_expressions_in_string(&expanded)?;
+                // Restore escaped braces
+                let final_value = restore_escaped_braces(&with_exprs);
+                Ok(ConfigValue::String(final_value))
             }
         }
     }
@@ -474,6 +497,54 @@ impl Config {
 
         // Default to string (remove any trailing whitespace)
         Ok(ConfigValue::String(s.to_string()))
+    }
+
+    /// Evaluate all {{expr}} expressions in a string
+    fn evaluate_expressions_in_string(&self, input: &str) -> ParseResult<String> {
+        let mut result = String::new();
+        let mut chars = input.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '{' {
+                if chars.peek() == Some(&'{') {
+                    chars.next(); // consume second {
+
+                    // Find the closing }}
+                    let mut expr = String::new();
+                    let mut depth = 1;
+
+                    while let Some(c) = chars.next() {
+                        if c == '{' && chars.peek() == Some(&'{') {
+                            depth += 1;
+                            expr.push(c);
+                            chars.next();
+                            expr.push('{');
+                        } else if c == '}' && chars.peek() == Some(&'}') {
+                            depth -= 1;
+                            if depth == 0 {
+                                chars.next(); // consume second }
+                                break;
+                            }
+                            expr.push(c);
+                            chars.next();
+                            expr.push('}');
+                        } else {
+                            expr.push(c);
+                        }
+                    }
+
+                    // Evaluate the expression
+                    let value = self.expressions.evaluate(&expr)?;
+                    result.push_str(&value.to_string());
+                } else {
+                    result.push(ch);
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+
+        Ok(result)
     }
 
     fn parse_rgba_string(&self, s: &str) -> ParseResult<Color> {
@@ -681,6 +752,24 @@ impl Config {
         self.special_categories.register(descriptor);
     }
 
+    /// Register a default value for a special category property
+    /// This adds a default value that will be applied to all instances of the category
+    pub fn register_special_category_value(
+        &mut self,
+        category: impl Into<String>,
+        property: impl Into<String>,
+        default_value: ConfigValue,
+    ) {
+        let category = category.into();
+        let property = property.into();
+
+        // Get the descriptor, add the default value, and re-register
+        if let Some(mut descriptor) = self.special_categories.get_descriptor(&category).cloned() {
+            descriptor.default_values.insert(property, default_value);
+            self.special_categories.register(descriptor);
+        }
+    }
+
     /// Get a special category instance
     pub fn get_special_category(&self, category: &str, key: &str) -> ParseResult<HashMap<String, &ConfigValue>> {
         let instance = self.special_categories.get_instance(category, key)?;
@@ -879,7 +968,7 @@ impl Config {
     /// # }
     /// ```
     #[cfg(feature = "mutation")]
-    pub fn get_variable_mut(&mut self, name: &str) -> Option<crate::mutation::MutableVariable> {
+    pub fn get_variable_mut(&mut self, name: &str) -> Option<crate::mutation::MutableVariable<'_>> {
         if self.variables.contains(name) {
             // We need to use unsafe here to work around the borrow checker
             // This is safe because we're only accessing disjoint fields
@@ -1078,7 +1167,7 @@ impl Config {
         &mut self,
         category: &str,
         key: &str,
-    ) -> ParseResult<crate::mutation::MutableCategoryInstance> {
+    ) -> ParseResult<crate::mutation::MutableCategoryInstance<'_>> {
         // Verify it exists
         if !self.special_categories.instance_exists(category, key) {
             return Err(ConfigError::category_not_found(category, Some(key.to_string())));

@@ -1,6 +1,6 @@
 use pest::Parser;
 use pest_derive::Parser;
-use crate::error::{ConfigError, ParseResult};
+use crate::error::ParseResult;
 use crate::types::{Color, Vec2};
 
 #[derive(Parser)]
@@ -62,6 +62,7 @@ pub enum Statement {
 
 /// Parsed value types
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Variants are constructed by parser, not explicitly in code
 pub enum Value {
     /// Expression: {{expr}}
     Expression(String),
@@ -191,11 +192,30 @@ impl HyprlangParser {
                 Ok(Some(Statement::Source { path }))
             }
 
-            Rule::comment_directive => {
-                let mut inner = pair.into_inner();
-                let directive_type = inner.next().unwrap().as_str().to_string();
-                let args = inner.next().map(|p| p.as_str().to_string());
-                Ok(Some(Statement::CommentDirective { directive_type, args }))
+            Rule::comment => {
+                let comment_text = pair.as_str().trim_start_matches('#').trim_start();
+
+                // Check if this is a hyprlang directive
+                if let Some(directive_text) = comment_text.strip_prefix("hyprlang") {
+                    let directive_text = directive_text.trim_start();
+
+                    // Parse directive type and args
+                    if let Some((directive_type, args)) = directive_text.split_once(char::is_whitespace) {
+                        return Ok(Some(Statement::CommentDirective {
+                            directive_type: directive_type.trim().to_string(),
+                            args: Some(args.trim().to_string()),
+                        }));
+                    } else if !directive_text.is_empty() {
+                        // No args, just the directive type
+                        return Ok(Some(Statement::CommentDirective {
+                            directive_type: directive_text.trim().to_string(),
+                            args: None,
+                        }));
+                    }
+                }
+
+                // Regular comments are ignored
+                Ok(None)
             }
 
             Rule::EOI => Ok(None),
@@ -266,7 +286,7 @@ impl HyprlangParser {
     /// Parse configuration and build document tree (for mutation feature)
     #[cfg(feature = "mutation")]
     pub fn parse_with_document(input: &str) -> ParseResult<(ParsedConfig, crate::document::ConfigDocument)> {
-        use crate::document::{ConfigDocument, DocumentNode};
+        use crate::document::ConfigDocument;
 
         let pairs = HyprlangParser::parse(Rule::file, input)?;
         let mut statements = Vec::new();
@@ -474,22 +494,37 @@ impl HyprlangParser {
                 Ok(Some((stmt, Some(node))))
             }
 
-            Rule::comment_directive => {
-                let mut inner = pair.into_inner();
-                let directive_type = inner.next().unwrap().as_str().to_string();
-                let args = inner.next().map(|p| p.as_str().to_string());
+            Rule::comment => {
+                let comment_text = pair.as_str().trim_start_matches('#').trim_start();
 
-                let stmt = Statement::CommentDirective {
-                    directive_type: directive_type.clone(),
-                    args: args.clone()
-                };
-                let node = DocumentNode::CommentDirective {
-                    directive_type,
-                    args,
-                    raw,
-                    line,
-                };
-                Ok(Some((stmt, Some(node))))
+                // Check if this is a hyprlang directive
+                if let Some(directive_text) = comment_text.strip_prefix("hyprlang") {
+                    let directive_text = directive_text.trim_start();
+
+                    // Parse directive type and args
+                    let (directive_type, args) = if let Some((dt, a)) = directive_text.split_once(char::is_whitespace) {
+                        (dt.trim().to_string(), Some(a.trim().to_string()))
+                    } else if !directive_text.is_empty() {
+                        (directive_text.trim().to_string(), None)
+                    } else {
+                        return Ok(None);
+                    };
+
+                    let stmt = Statement::CommentDirective {
+                        directive_type: directive_type.clone(),
+                        args: args.clone()
+                    };
+                    let node = DocumentNode::CommentDirective {
+                        directive_type,
+                        args,
+                        raw,
+                        line,
+                    };
+                    return Ok(Some((stmt, Some(node))));
+                }
+
+                // Regular comments are ignored
+                Ok(None)
             }
 
             Rule::EOI => Ok(None),

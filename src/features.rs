@@ -33,8 +33,18 @@ impl DirectiveProcessor {
                 })?;
 
                 let var_name = var_name.trim();
+
+                // Check for negation (!)
+                let (negated, var_name) = if var_name.starts_with('!') {
+                    (true, var_name[1..].trim())
+                } else {
+                    (false, var_name)
+                };
+
                 let condition = variables.contains(var_name);
-                self.if_stack.push(condition);
+                let final_condition = if negated { !condition } else { condition };
+
+                self.if_stack.push(final_condition);
                 Ok(())
             }
 
@@ -70,6 +80,7 @@ impl DirectiveProcessor {
     }
 
     /// Check if errors should be suppressed
+    #[allow(dead_code)]
     pub fn should_suppress_errors(&self) -> bool {
         self.suppress_errors
     }
@@ -81,6 +92,7 @@ impl DirectiveProcessor {
     }
 
     /// Check if there are unclosed if blocks
+    #[allow(dead_code)]
     pub fn has_unclosed_blocks(&self) -> bool {
         !self.if_stack.is_empty()
     }
@@ -114,6 +126,7 @@ impl SourceResolver {
     }
 
     /// Set the maximum recursion depth
+    #[allow(dead_code)]
     pub fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = max_depth;
         self
@@ -162,11 +175,13 @@ impl SourceResolver {
     }
 
     /// Get the current loading stack depth
+    #[allow(dead_code)]
     pub fn depth(&self) -> usize {
         self.loading_stack.len()
     }
 
     /// Reset the resolver
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.loading_stack.clear();
     }
@@ -182,11 +197,13 @@ impl MultilineProcessor {
     }
 
     /// Check if a line ends with a backslash (continuation)
+    #[allow(dead_code)]
     pub fn is_continuation(line: &str) -> bool {
         line.trim_end().ends_with('\\')
     }
 
     /// Remove the trailing backslash from a line
+    #[allow(dead_code)]
     pub fn remove_backslash(line: &str) -> String {
         let trimmed = line.trim_end();
         if trimmed.ends_with('\\') {
