@@ -1,5 +1,5 @@
 use crate::error::{ConfigError, ParseResult};
-use crate::types::ConfigValueEntry;
+use crate::types::{ConfigValue, ConfigValueEntry};
 use std::collections::HashMap;
 
 /// Type of special category
@@ -24,6 +24,9 @@ pub struct SpecialCategoryDescriptor {
 
     /// Name of the key field (for keyed categories)
     pub key_field: Option<String>,
+
+    /// Default values for properties in this category
+    pub default_values: HashMap<String, ConfigValue>,
 }
 
 impl SpecialCategoryDescriptor {
@@ -33,6 +36,7 @@ impl SpecialCategoryDescriptor {
             name: name.into(),
             category_type: SpecialCategoryType::Keyed,
             key_field: Some(key_field.into()),
+            default_values: HashMap::new(),
         }
     }
 
@@ -42,6 +46,7 @@ impl SpecialCategoryDescriptor {
             name: name.into(),
             category_type: SpecialCategoryType::Static,
             key_field: None,
+            default_values: HashMap::new(),
         }
     }
 
@@ -51,7 +56,14 @@ impl SpecialCategoryDescriptor {
             name: name.into(),
             category_type: SpecialCategoryType::Anonymous,
             key_field: None,
+            default_values: HashMap::new(),
         }
+    }
+
+    /// Add a default value for a property
+    pub fn with_default(mut self, property: impl Into<String>, value: ConfigValue) -> Self {
+        self.default_values.insert(property.into(), value);
+        self
     }
 }
 
@@ -136,7 +148,8 @@ impl SpecialCategoryManager {
         key: Option<String>,
     ) -> ParseResult<String> {
         let descriptor = self.descriptors.get(category_name)
-            .ok_or_else(|| ConfigError::category_not_found(category_name, None))?;
+            .ok_or_else(|| ConfigError::category_not_found(category_name, None))?
+            .clone(); // Clone to avoid borrow checker issues
 
         let instance_key = match descriptor.category_type {
             SpecialCategoryType::Keyed => {
@@ -166,8 +179,18 @@ impl SpecialCategoryManager {
             }
         };
 
-        // Create the instance
-        let instance = SpecialCategoryInstance::new(Some(instance_key.clone()));
+        // Create the instance with default values
+        let mut instance = SpecialCategoryInstance::new(Some(instance_key.clone()));
+
+        // Apply default values from descriptor
+        for (prop_name, default_value) in &descriptor.default_values {
+            let raw = default_value.to_string();
+            instance.set(
+                prop_name.clone(),
+                ConfigValueEntry::new(default_value.clone(), raw)
+            );
+        }
+
         self.instances.entry(category_name.to_string())
             .or_insert_with(HashMap::new)
             .insert(instance_key.clone(), instance);

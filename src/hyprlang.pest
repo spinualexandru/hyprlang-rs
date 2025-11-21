@@ -3,15 +3,12 @@
 
 WHITESPACE = _{ " " | "\t" }
 NEWLINE = _{ "\r\n" | "\n" | "\r" }
-COMMENT = _{ comment_single | comment_double }
-comment_single = @{ "#" ~ (!("##" | NEWLINE) ~ ANY)* }
-comment_double = @{ "##" ~ (!NEWLINE ~ ANY)* }
 
 // Top-level grammar
 file = { SOI ~ (NEWLINE* ~ statement ~ NEWLINE*)* ~ EOI }
 
 statement = _{
-    comment_directive |
+    comment |
     directive |
     variable_def |
     category_block |
@@ -19,13 +16,8 @@ statement = _{
     assignment
 }
 
-// Comment directives: # hyprlang if/endif/noerror
-comment_directive = {
-    "#" ~ "hyprlang" ~ directive_type ~ directive_args?
-}
-
-directive_type = { "if" | "endif" | "noerror" }
-directive_args = { (!("\n" | "\r") ~ ANY)+ }
+// Comments (including hyprlang directives)
+comment = @{ "#" ~ (!NEWLINE ~ ANY)* }
 
 // Source directive: source = ./file.conf
 directive = { "source" ~ "=" ~ value }
@@ -112,7 +104,7 @@ string_value = @{
 }
 
 quoted_string = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
-unquoted_string = @{ (!(NEWLINE | "#" | "\\") ~ ANY)+ }
+unquoted_string = @{ (!(NEWLINE | "#") ~ ANY)+ }
 
 // Identifiers (allow dots for things like col.active_border)
 ident = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }

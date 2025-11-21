@@ -26,9 +26,11 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 - 🔌 **Handler System** - Extensible keyword handlers for custom syntax
 - 🏷️ **Special Categories** - Keyed, static, and anonymous category types
 - 📄 **Source Directives** - Include external configuration files
-- 💬 **Conditional Directives** - `# hyprlang if/endif/noerror` support
+- 💬 **Conditional Directives** - `# hyprlang if/endif/noerror` support with negation
+- 🎨 **Expression Escaping** - Escape expressions with `\{{}}` or `{\{}}` for literal braces
 - 🔄 **Mutation & Serialization** - Modify config values and save back to files (optional)
-- ✅ **Fully Tested** - 57 tests covering all features
+- 🎯 **Windowrule v3 / Layerrule v2** - Full support for new special category syntax with 85+ registered properties
+- ✅ **Fully Tested** - 148 tests covering all features
 
 ## Installation
 
@@ -36,7 +38,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.1.5"
+hyprlang = "0.2.0"
 ```
 
 ### Optional Features
@@ -47,7 +49,7 @@ Enable the `hyprland` feature to get a high-level `Hyprland` struct with pre-con
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.1.5", features = ["hyprland"] }
+hyprlang = { version = "0.2.0", features = ["hyprland"] }
 ```
 
 This feature provides:
@@ -61,7 +63,7 @@ Enable the `mutation` feature to modify configuration values and serialize confi
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.1.5", features = ["mutation"] }
+hyprlang = { version = "0.2.0", features = ["mutation"] }
 ```
 
 This feature provides:
@@ -279,14 +281,32 @@ hypr.all_binds() -> Vec<&String>            // All bind definitions
 hypr.all_bindm() -> Vec<&String>            // All mouse bindings
 hypr.all_bindel() -> Vec<&String>           // All bindel definitions
 hypr.all_bindl() -> Vec<&String>            // All bindl definitions
-hypr.all_windowrules() -> Vec<&String>      // All windowrule definitions
-hypr.all_windowrulesv2() -> Vec<&String>    // All windowrulev2 definitions
-hypr.all_layerrules() -> Vec<&String>       // All layerrule definitions
+hypr.all_windowrules() -> Vec<&String>      // All windowrule v1 definitions (deprecated)
+hypr.all_windowrulesv2() -> Vec<&String>    // All windowrule v2 definitions (deprecated)
+hypr.all_layerrules() -> Vec<&String>       // All layerrule v1 definitions (deprecated)
 hypr.all_workspaces() -> Vec<&String>       // All workspace definitions
 hypr.all_monitors() -> Vec<&String>         // All monitor definitions
 hypr.all_env() -> Vec<&String>              // All env definitions
 hypr.all_exec() -> Vec<&String>             // All exec definitions
 hypr.all_exec_once() -> Vec<&String>        // All exec-once definitions
+```
+
+#### Windowrule v3 & Layerrule v2 (Special Categories)
+```rust
+// New v3 syntax for windowrules
+hypr.windowrule_names() -> Vec<String>                    // All windowrule names
+hypr.get_windowrule(name: &str) -> Result<RuleInstance>  // Get specific rule
+
+// New v2 syntax for layerrules
+hypr.layerrule_names() -> Vec<String>                     // All layerrule names
+hypr.get_layerrule(name: &str) -> Result<RuleInstance>   // Get specific rule
+
+// RuleInstance helper provides typed access to properties:
+rule.get(key: &str) -> Result<&ConfigValue>       // Get any property
+rule.get_string(key: &str) -> Result<String>      // Get as string
+rule.get_int(key: &str) -> Result<i64>            // Get as integer
+rule.get_float(key: &str) -> Result<f64>          // Get as float
+rule.get_color(key: &str) -> Result<Color>        // Get as color
 ```
 
 #### Variables
@@ -329,8 +349,10 @@ The `Hyprland` struct automatically registers these handlers:
 - `animations:bezier` - Bezier curve definitions
 
 **Special categories:**
-- `device[name]` - Per-device input configuration
+- `device[name]` - Per-device input configuration (keyed category)
 - `monitor[name]` - Per-monitor configuration (keyed category)
+- `windowrule[name]` - Window rules v3 syntax (keyed category with 80+ properties)
+- `layerrule[name]` - Layer rules v2 syntax (keyed category with 12 properties)
 
 ### When to Use Each API
 
@@ -522,13 +544,13 @@ assert_eq!(anims.len(), 2);
 ### Special Categories
 
 ```rust
-use hyprlang::{Config, SpecialCategoryDescriptor, SpecialCategoryType};
+use hyprlang::{Config, SpecialCategoryDescriptor};
 
 let mut config = Config::new();
 
 // Register a special category
 config.register_special_category(
-    SpecialCategoryDescriptor::new("device", SpecialCategoryType::Keyed)
+    SpecialCategoryDescriptor::keyed("device", "name")
 );
 
 config.parse(r#"
@@ -546,6 +568,78 @@ config.parse(r#"
 // Access keyed category instances
 let mouse = config.get_special_category("device", "mouse")?;
 println!("Mouse sensitivity: {:?}", mouse.get("sensitivity"));
+```
+
+### Windowrule v3 / Layerrule v2 (Hyprland Feature)
+
+The new windowrule v3 and layerrule v2 syntax uses special category blocks:
+
+```rust
+use hyprlang::Hyprland;
+
+let mut hypr = Hyprland::new();
+
+hypr.parse(r#"
+    # New v3 syntax - windowrule as special category
+    windowrule[float-terminals] {
+        # Match properties
+        match:class = ^(kitty|alacritty)$
+        match:floating = false
+
+        # Effect properties
+        float = true
+        size = 800 600
+        center = true
+        opacity = 0.95
+        rounding = 10
+        border_color = rgba(33ccffee)
+    }
+
+    # Layerrule v2 syntax
+    layerrule[blur-waybar] {
+        match:namespace = waybar
+        blur = true
+        ignorealpha = 0.5
+    }
+"#)?;
+
+// Access windowrules
+let names = hypr.windowrule_names();  // vec!["float-terminals"]
+let rule = hypr.get_windowrule("float-terminals")?;
+
+// Get properties with type safety
+let class_match = rule.get_string("match:class")?;  // "^(kitty|alacritty)$"
+let is_float = rule.get_int("float")?;               // 1 (true)
+let opacity = rule.get_float("opacity")?;             // 0.95
+let color = rule.get_color("border_color")?;          // Color { r: 51, g: 204, b: 255, a: 238 }
+
+// Old v2 handler syntax still works for backward compatibility
+hypr.parse(r#"
+    windowrulev2 = float, class:^(kitty)$
+"#)?;
+
+let v2_rules = hypr.all_windowrulesv2();
+```
+
+#### Supported Properties
+
+**Windowrule v3 - Match Properties (19):**
+- `match:class`, `match:title`, `match:initial_class`, `match:initial_title`
+- `match:floating`, `match:xwayland`, `match:fullscreen`, `match:pinned`
+- `match:focus`, `match:group`, `match:modal`, `match:tag`
+- `match:fullscreenstate_internal`, `match:fullscreenstate_client`
+- `match:on_workspace`, `match:content`, `match:xdg_tag`
+- `match:namespace`, `match:exec_token`
+
+**Windowrule v3 - Effect Properties (60+ with aliases):**
+- Static: `float`, `tile`, `fullscreen`, `maximize`, `move`, `size`, `center`, `pseudo`, `monitor`, `workspace`, `pin`, `group`, etc.
+- Dynamic: `rounding`, `opacity`, `border_color`, `border_size`, `max_size`, `min_size`, `animation`, `no_blur`, `no_shadow`, `xray`, etc.
+
+**Layerrule v2 - Match Properties (6):**
+- `match:namespace`, `match:address`, `match:class`, `match:title`, `match:monitor`, `match:layer`
+
+**Layerrule v2 - Effect Properties (6):**
+- `blur`, `ignorealpha`, `ignorezero`, `animation`, `noanim`, `xray`
 ```
 
 ### Source Directive
@@ -844,13 +938,16 @@ cargo test
 cargo test --all-features
 ```
 
-The project includes:
-- 39 unit tests covering core functionality (including mutation features)
-- 12 integration tests for Hyprland-specific scenarios
-- 3 mutation integration tests
-- 3 documentation tests
+The project includes **148 tests** with 100% pass rate:
+- 52 unit tests covering core functionality
+- 11 conditional directive tests
+- 11 expression escaping tests
+- 15 windowrule v3 / layerrule v2 tests
+- 12 Hyprland config tests
+- 6 mutation tests
+- 41 documentation tests
 
-All tests from the original Hyprlang C++ implementation have been ported and pass successfully.
+All tests from the original Hyprlang C++ implementation have been ported and pass successfully, plus additional tests for new features like expression escaping, negated conditionals, and windowrule v3 syntax.
 
 ## Grammar
 
@@ -858,13 +955,16 @@ The parser is implemented using [pest](https://pest.rs/) with a PEG grammar. The
 
 Key syntax features:
 - Comments: `#` for single-line, `##` for documentation
-- Variables: `$VAR = value`
-- Expressions: `{{expr}}`
-- Categories: `category { ... }`
-- Special categories: `category[key] { ... }`
+- Variables: `$VAR = value`, `$env:PATH` (environment variables)
+- Expressions: `{{expr}}` with arithmetic operators (+, -, *, /)
+- Expression escaping: `\{{}}` or `{\{}}` for literal braces
+- Categories: `category { ... }` (nested supported)
+- Special categories: `category[key] { ... }` (keyed, static, anonymous)
 - Assignments: `key = value`
-- Handlers: `keyword = value`
-- Directives: `source = path`, `# hyprlang if/endif/noerror`
+- Handlers: `keyword = value` (with optional flags: `keyword[flag]`)
+- Source directive: `source = path`
+- Conditional directives: `# hyprlang if VAR`, `# hyprlang if !VAR`, `# hyprlang endif`
+- Error suppression: `# hyprlang noerror true/false`
 
 ## License
 

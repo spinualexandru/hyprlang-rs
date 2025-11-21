@@ -27,7 +27,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! hyprlang = { version = "0.1.5", features = ["mutation"] }
+//! hyprlang = { version = "0.2.0", features = ["mutation"] }
 //! ```
 //!
 //! This provides:
@@ -131,6 +131,7 @@
 // Module declarations
 mod config;
 mod error;
+mod escaping;
 mod expressions;
 mod features;
 mod handlers;
@@ -155,6 +156,7 @@ pub use error::{ConfigError, ParseResult};
 pub use types::{Color, ConfigValue, ConfigValueEntry, CustomValueType, Vec2};
 
 // Re-export submodules for advanced usage
+pub use escaping::{process_escapes, restore_escaped_braces};
 pub use expressions::ExpressionEvaluator;
 pub use handlers::{FunctionHandler, Handler, HandlerContext, HandlerManager, HandlerScope};
 pub use special_categories::{
