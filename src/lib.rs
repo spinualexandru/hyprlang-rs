@@ -166,7 +166,7 @@ pub use variables::VariableManager;
 
 // Feature-gated exports
 #[cfg(feature = "hyprland")]
-pub use hyprland::Hyprland;
+pub use hyprland::{Hyprland, RuleInstance};
 
 #[cfg(feature = "mutation")]
 pub use document::{ConfigDocument, DocumentNode, NodeLocation, NodeType};
