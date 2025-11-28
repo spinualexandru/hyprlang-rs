@@ -197,8 +197,6 @@ pub struct MutableCategoryInstance<'a> {
     category: String,
     key: String,
     manager: &'a mut SpecialCategoryManager,
-    #[allow(dead_code)]
-    document: Option<&'a mut ConfigDocument>,
 }
 
 impl<'a> MutableCategoryInstance<'a> {
@@ -207,13 +205,11 @@ impl<'a> MutableCategoryInstance<'a> {
         category: String,
         key: String,
         manager: &'a mut SpecialCategoryManager,
-        document: Option<&'a mut ConfigDocument>,
     ) -> Self {
         Self {
             category,
             key,
             manager,
-            document,
         }
     }
 
@@ -236,7 +232,8 @@ impl<'a> MutableCategoryInstance<'a> {
     /// ```
     pub fn get(&self, key: &str) -> ParseResult<&ConfigValue> {
         let instance = self.manager.get_instance(&self.category, &self.key)?;
-        instance.get(key)
+        instance
+            .get(key)
             .map(|entry| &entry.value)
             .ok_or_else(|| ConfigError::key_not_found(key))
     }
@@ -270,11 +267,6 @@ impl<'a> MutableCategoryInstance<'a> {
         let instance = self.manager.get_instance_mut(&self.category, &self.key)?;
         instance.set(key.clone(), entry);
 
-        // TODO: Update document if available
-        // if let Some(doc) = &mut self.document {
-        //     doc.update_or_insert_category_value(&self.category, &self.key, &key, &raw)?;
-        // }
-
         Ok(())
     }
 
@@ -301,13 +293,10 @@ impl<'a> MutableCategoryInstance<'a> {
     /// ```
     pub fn remove(&mut self, key: &str) -> ParseResult<ConfigValue> {
         let instance = self.manager.get_instance_mut(&self.category, &self.key)?;
-        let entry = instance.values.remove(key)
+        let entry = instance
+            .values
+            .remove(key)
             .ok_or_else(|| ConfigError::key_not_found(key))?;
-
-        // TODO: Remove from document
-        // if let Some(doc) = &mut self.document {
-        //     doc.remove_category_value(&self.category, &self.key, key)?;
-        // }
 
         Ok(entry.value)
     }

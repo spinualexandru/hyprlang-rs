@@ -21,37 +21,22 @@ pub enum ConfigError {
     },
 
     /// Variable not found
-    VariableNotFound {
-        name: String,
-    },
+    VariableNotFound { name: String },
 
     /// Circular variable dependency
-    CircularDependency {
-        chain: Vec<String>,
-    },
+    CircularDependency { chain: Vec<String> },
 
     /// Expression evaluation error
-    ExpressionError {
-        expression: String,
-        reason: String,
-    },
+    ExpressionError { expression: String, reason: String },
 
     /// Invalid color format
-    InvalidColor {
-        value: String,
-        reason: String,
-    },
+    InvalidColor { value: String, reason: String },
 
     /// Invalid number format
-    InvalidNumber {
-        value: String,
-        reason: String,
-    },
+    InvalidNumber { value: String, reason: String },
 
     /// Configuration key not found
-    KeyNotFound {
-        key: String,
-    },
+    KeyNotFound { key: String },
 
     /// Special category not found
     CategoryNotFound {
@@ -60,26 +45,16 @@ pub enum ConfigError {
     },
 
     /// Handler error
-    HandlerError {
-        handler: String,
-        message: String,
-    },
+    HandlerError { handler: String, message: String },
 
     /// File I/O error
-    IoError {
-        path: String,
-        message: String,
-    },
+    IoError { path: String, message: String },
 
     /// Custom error with message
-    Custom {
-        message: String,
-    },
+    Custom { message: String },
 
     /// Multiple errors collected together
-    Multiple {
-        errors: Vec<ConfigError>,
-    },
+    Multiple { errors: Vec<ConfigError> },
 }
 
 impl ConfigError {
@@ -93,7 +68,11 @@ impl ConfigError {
     }
 
     /// Create a type error
-    pub fn type_error(key: impl Into<String>, expected: impl Into<String>, found: impl Into<String>) -> Self {
+    pub fn type_error(
+        key: impl Into<String>,
+        expected: impl Into<String>,
+        found: impl Into<String>,
+    ) -> Self {
         ConfigError::TypeError {
             key: key.into(),
             expected: expected.into(),
@@ -103,9 +82,7 @@ impl ConfigError {
 
     /// Create a variable not found error
     pub fn variable_not_found(name: impl Into<String>) -> Self {
-        ConfigError::VariableNotFound {
-            name: name.into(),
-        }
+        ConfigError::VariableNotFound { name: name.into() }
     }
 
     /// Create a circular dependency error
@@ -139,9 +116,7 @@ impl ConfigError {
 
     /// Create a key not found error
     pub fn key_not_found(key: impl Into<String>) -> Self {
-        ConfigError::KeyNotFound {
-            key: key.into(),
-        }
+        ConfigError::KeyNotFound { key: key.into() }
     }
 
     /// Create a category not found error
@@ -184,11 +159,27 @@ impl ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::ParseError { line, column, message } => {
-                write!(f, "Parse error at line {}, column {}: {}", line, column, message)
+            ConfigError::ParseError {
+                line,
+                column,
+                message,
+            } => {
+                write!(
+                    f,
+                    "Parse error at line {}, column {}: {}",
+                    line, column, message
+                )
             }
-            ConfigError::TypeError { key, expected, found } => {
-                write!(f, "Type error for '{}': expected {}, found {}", key, expected, found)
+            ConfigError::TypeError {
+                key,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "Type error for '{}': expected {}, found {}",
+                    key, expected, found
+                )
             }
             ConfigError::VariableNotFound { name } => {
                 write!(f, "Variable '{}' not found", name)

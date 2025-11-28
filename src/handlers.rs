@@ -2,6 +2,9 @@ use crate::error::{ConfigError, ParseResult};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// Type alias for handler functions
+type HandlerFn = Rc<dyn Fn(&HandlerContext) -> ParseResult<()>>;
+
 /// Context for handler execution
 pub struct HandlerContext {
     /// The category path where this handler is being called
@@ -62,7 +65,7 @@ pub trait Handler: std::fmt::Debug {
 pub struct FunctionHandler {
     name: String,
     accepts_flags: bool,
-    handler: Rc<dyn Fn(&HandlerContext) -> ParseResult<()>>,
+    handler: HandlerFn,
 }
 
 impl FunctionHandler {
@@ -143,7 +146,8 @@ impl HandlerManager {
     where
         H: Handler + 'static,
     {
-        self.global_handlers.insert(keyword.into(), Box::new(handler));
+        self.global_handlers
+            .insert(keyword.into(), Box::new(handler));
     }
 
     /// Register a category-scoped handler
@@ -152,35 +156,29 @@ impl HandlerManager {
         category: impl Into<String>,
         keyword: impl Into<String>,
         handler: H,
-    )
-    where
+    ) where
         H: Handler + 'static,
     {
         self.category_handlers
             .entry(category.into())
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(keyword.into(), Box::new(handler));
     }
 
     /// Find a handler for a keyword in a given category
-    pub fn find_handler(
-        &self,
-        category_path: &[String],
-        keyword: &str,
-    ) -> Option<&dyn Handler> {
+    pub fn find_handler(&self, category_path: &[String], keyword: &str) -> Option<&dyn Handler> {
         // First try category-specific handlers (most specific to least specific)
         for i in (0..=category_path.len()).rev() {
             let path = category_path[..i].join(":");
-            if let Some(handlers) = self.category_handlers.get(&path) {
-                if let Some(handler) = handlers.get(keyword) {
-                    return Some(handler.as_ref());
-                }
+            if let Some(handlers) = self.category_handlers.get(&path)
+                && let Some(handler) = handlers.get(keyword)
+            {
+                return Some(handler.as_ref());
             }
         }
 
         // Fall back to global handlers
-        self.global_handlers.get(keyword)
-            .map(|h| h.as_ref())
+        self.global_handlers.get(keyword).map(|h| h.as_ref())
     }
 
     /// Check if a handler exists for a keyword
@@ -196,12 +194,16 @@ impl HandlerManager {
         value: &str,
         flags: Option<String>,
     ) -> ParseResult<()> {
-        let handler = self.find_handler(category_path, keyword)
+        let handler = self
+            .find_handler(category_path, keyword)
             .ok_or_else(|| ConfigError::handler(keyword, "handler not found"))?;
 
         // Check if flags are provided but not accepted
         if flags.is_some() && !handler.accepts_flags() {
-            return Err(ConfigError::handler(keyword, "handler does not accept flags"));
+            return Err(ConfigError::handler(
+                keyword,
+                "handler does not accept flags",
+            ));
         }
 
         let context = HandlerContext::new(keyword.to_string(), value.to_string())
@@ -224,7 +226,8 @@ impl HandlerManager {
 
     /// Get all registered category handler keywords for a category
     pub fn category_keywords(&self, category: &str) -> Vec<&str> {
-        self.category_handlers.get(category)
+        self.category_handlers
+            .get(category)
             .map(|handlers| handlers.keys().map(|s| s.as_str()).collect())
             .unwrap_or_default()
     }
@@ -267,7 +270,9 @@ mod tests {
 
         manager.register_global("flagged", handler);
 
-        manager.execute(&[], "flagged", "value", Some("abc".to_string())).unwrap();
+        manager
+            .execute(&[], "flagged", "value", Some("abc".to_string()))
+            .unwrap();
     }
 
     #[test]
@@ -284,7 +289,9 @@ mod tests {
         assert!(manager.has_handler(&["category".to_string()], "scoped"));
         assert!(!manager.has_handler(&[], "scoped"));
 
-        manager.execute(&["category".to_string()], "scoped", "value", None).unwrap();
+        manager
+            .execute(&["category".to_string()], "scoped", "value", None)
+            .unwrap();
     }
 
     #[test]
@@ -301,6 +308,8 @@ mod tests {
         let category = FunctionHandler::new("keyword", |_| Ok(()));
         manager.register_category("cat", "keyword", category);
 
-        manager.execute(&["cat".to_string()], "keyword", "value", None).unwrap();
+        manager
+            .execute(&["cat".to_string()], "keyword", "value", None)
+            .unwrap();
     }
 }

@@ -109,38 +109,38 @@ pub fn process_escapes(input: &str) -> String {
             }
 
             '{' => {
-                if let Some(&next) = chars.peek() {
-                    if next == '\\' {
-                        let mut temp = chars.clone();
-                        temp.next(); // consume \
-                        if temp.peek() == Some(&'{') {
-                            // {\{ - escape for {{
-                            chars.next(); // consume \
-                            chars.next(); // consume {
-                            result.push_str(ESCAPED_OPEN);
+                if let Some(&next) = chars.peek()
+                    && next == '\\'
+                {
+                    let mut temp = chars.clone();
+                    temp.next(); // consume \
+                    if temp.peek() == Some(&'{') {
+                        // {\{ - escape for {{
+                        chars.next(); // consume \
+                        chars.next(); // consume {
+                        result.push_str(ESCAPED_OPEN);
 
-                            // Find and escape the closing }}
-                            let mut depth = 1;
-                            while let Some(c) = chars.next() {
-                                if c == '{' && chars.peek() == Some(&'{') {
-                                    depth += 1;
-                                    result.push(c);
-                                    result.push(chars.next().unwrap());
-                                } else if c == '}' && chars.peek() == Some(&'}') {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        chars.next(); // consume second }
-                                        result.push_str(ESCAPED_CLOSE);
-                                        break;
-                                    }
-                                    result.push(c);
-                                    result.push(chars.next().unwrap());
-                                } else {
-                                    result.push(c);
+                        // Find and escape the closing }}
+                        let mut depth = 1;
+                        while let Some(c) = chars.next() {
+                            if c == '{' && chars.peek() == Some(&'{') {
+                                depth += 1;
+                                result.push(c);
+                                result.push(chars.next().unwrap());
+                            } else if c == '}' && chars.peek() == Some(&'}') {
+                                depth -= 1;
+                                if depth == 0 {
+                                    chars.next(); // consume second }
+                                    result.push_str(ESCAPED_CLOSE);
+                                    break;
                                 }
+                                result.push(c);
+                                result.push(chars.next().unwrap());
+                            } else {
+                                result.push(c);
                             }
-                            continue;
                         }
+                        continue;
                     }
                 }
                 result.push(ch);

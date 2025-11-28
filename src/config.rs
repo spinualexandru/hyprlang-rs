@@ -106,8 +106,7 @@ impl Config {
 
     /// Create a new configuration with custom options
     pub fn with_options(options: ConfigOptions) -> Self {
-        let source_resolver = options.base_dir.as_ref()
-            .map(|dir| SourceResolver::new(dir));
+        let source_resolver = options.base_dir.as_ref().map(SourceResolver::new);
 
         Self {
             values: HashMap::new(),
@@ -144,11 +143,11 @@ impl Config {
             .map_err(|e| ConfigError::io(path.display().to_string(), e.to_string()))?;
 
         // Set base dir from file path if not already set
-        if self.options.base_dir.is_none() {
-            if let Some(parent) = path.parent() {
-                self.options.base_dir = Some(parent.to_path_buf());
-                self.source_resolver = Some(SourceResolver::new(parent));
-            }
+        if self.options.base_dir.is_none()
+            && let Some(parent) = path.parent()
+        {
+            self.options.base_dir = Some(parent.to_path_buf());
+            self.source_resolver = Some(SourceResolver::new(parent));
         }
 
         self.parse(&content)
@@ -179,7 +178,7 @@ impl Config {
         }
 
         if !self.errors.is_empty() {
-            return Err(ConfigError::multiple(self.errors.clone()));
+            return Err(ConfigError::multiple(std::mem::take(&mut self.errors)));
         }
 
         Ok(())
@@ -204,7 +203,11 @@ impl Config {
         // Check if we should execute this statement based on directives
         if !self.directives.should_execute() {
             // Still need to process directives even when not executing
-            if let Statement::CommentDirective { directive_type, args } = statement {
+            if let Statement::CommentDirective {
+                directive_type,
+                args,
+            } = statement
+            {
                 return self.directives.process_directive(
                     directive_type,
                     args.as_deref(),
@@ -257,25 +260,19 @@ impl Config {
 
                     self.handler_calls
                         .entry(full_key)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(expanded_value.clone());
 
-                    self.handlers.execute(
-                        &self.current_path,
-                        keyword,
-                        &expanded_value,
-                        None,
-                    )?;
+                    self.handlers
+                        .execute(&self.current_path, keyword, &expanded_value, None)?;
                 } else {
                     // Regular assignment
                     let full_key = self.make_full_key(key);
                     let config_value = self.parse_config_value(value)?;
                     let raw = self.value_to_string(value);
 
-                    self.values.insert(
-                        full_key,
-                        ConfigValueEntry::new(config_value, raw),
-                    );
+                    self.values
+                        .insert(full_key, ConfigValueEntry::new(config_value, raw));
                 }
 
                 Ok(())
@@ -299,7 +296,11 @@ impl Config {
                 Ok(())
             }
 
-            Statement::SpecialCategoryBlock { name, key, statements } => {
+            Statement::SpecialCategoryBlock {
+                name,
+                key,
+                statements,
+            } => {
                 // Ensure the category is registered
                 if !self.special_categories.is_registered(name) {
                     return Err(ConfigError::category_not_found(name, None));
@@ -308,7 +309,8 @@ impl Config {
                 // Create the instance with the provided key (or auto-generate if none)
                 let instance_key = self.special_categories.create_instance(name, key.clone())?;
 
-                self.current_path.push(format!("{}[{}]", name, instance_key));
+                self.current_path
+                    .push(format!("{}[{}]", name, instance_key));
 
                 // Process statements within the category
                 for stmt in statements {
@@ -326,11 +328,12 @@ impl Config {
                 let full_path = self.current_path.last().unwrap();
                 for (key, value) in &self.values {
                     if key.starts_with(full_path) {
-                        let sub_key = key.strip_prefix(full_path)
-                            .unwrap()
-                            .trim_start_matches(':');
+                        let sub_key = key.strip_prefix(full_path).unwrap().trim_start_matches(':');
 
-                        if let Ok(instance) = self.special_categories.get_instance_mut(name, &instance_key) {
+                        if let Ok(instance) = self
+                            .special_categories
+                            .get_instance_mut(name, &instance_key)
+                        {
                             instance.set(sub_key.to_string(), value.clone());
                         }
                     }
@@ -340,7 +343,11 @@ impl Config {
                 Ok(())
             }
 
-            Statement::HandlerCall { keyword, flags, value } => {
+            Statement::HandlerCall {
+                keyword,
+                flags,
+                value,
+            } => {
                 let expanded_value = self.variables.expand(value)?;
 
                 // Store the handler call value only if it's registered or at root level
@@ -356,17 +363,13 @@ impl Config {
 
                     self.handler_calls
                         .entry(full_key)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(expanded_value.clone());
                 }
 
                 // Execute the handler if one is registered
-                self.handlers.execute(
-                    &self.current_path,
-                    keyword,
-                    &expanded_value,
-                    flags.clone(),
-                )
+                self.handlers
+                    .execute(&self.current_path, keyword, &expanded_value, flags.clone())
             }
 
             Statement::Source { path } => {
@@ -392,12 +395,12 @@ impl Config {
                 result
             }
 
-            Statement::CommentDirective { directive_type, args } => {
-                self.directives.process_directive(
-                    directive_type,
-                    args.as_deref(),
-                    &self.variables,
-                )
+            Statement::CommentDirective {
+                directive_type,
+                args,
+            } => {
+                self.directives
+                    .process_directive(directive_type, args.as_deref(), &self.variables)
             }
         }
     }
@@ -549,7 +552,7 @@ impl Config {
 
     fn parse_rgba_string(&self, s: &str) -> ParseResult<Color> {
         // rgba(hex) or rgba(r, g, b, a)
-        let inner = &s[5..s.len()-1]; // Remove "rgba(" and ")"
+        let inner = &s[5..s.len() - 1]; // Remove "rgba(" and ")"
 
         if !inner.contains(',') {
             // Hex format: rgba(RRGGBBAA)
@@ -561,20 +564,25 @@ impl Config {
                 return Err(ConfigError::invalid_color(s, "rgba needs 4 components"));
             }
 
-            let r = parts[0].parse::<u8>()
+            let r = parts[0]
+                .parse::<u8>()
                 .map_err(|_| ConfigError::invalid_color(s, "invalid r"))?;
-            let g = parts[1].parse::<u8>()
+            let g = parts[1]
+                .parse::<u8>()
                 .map_err(|_| ConfigError::invalid_color(s, "invalid g"))?;
-            let b = parts[2].parse::<u8>()
+            let b = parts[2]
+                .parse::<u8>()
                 .map_err(|_| ConfigError::invalid_color(s, "invalid b"))?;
 
             // Alpha can be float (0.0-1.0) or int (0-255)
             let a = if parts[3].contains('.') {
-                let a_float = parts[3].parse::<f64>()
+                let a_float = parts[3]
+                    .parse::<f64>()
                     .map_err(|_| ConfigError::invalid_color(s, "invalid a"))?;
                 (a_float * 255.0).round() as u8
             } else {
-                parts[3].parse::<u8>()
+                parts[3]
+                    .parse::<u8>()
                     .map_err(|_| ConfigError::invalid_color(s, "invalid a"))?
             };
 
@@ -584,18 +592,21 @@ impl Config {
 
     fn parse_rgb_string(&self, s: &str) -> ParseResult<Color> {
         // rgb(r, g, b)
-        let inner = &s[4..s.len()-1]; // Remove "rgb(" and ")"
+        let inner = &s[4..s.len() - 1]; // Remove "rgb(" and ")"
         let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
 
         if parts.len() != 3 {
             return Err(ConfigError::invalid_color(s, "rgb needs 3 components"));
         }
 
-        let r = parts[0].parse::<u8>()
+        let r = parts[0]
+            .parse::<u8>()
             .map_err(|_| ConfigError::invalid_color(s, "invalid r"))?;
-        let g = parts[1].parse::<u8>()
+        let g = parts[1]
+            .parse::<u8>()
             .map_err(|_| ConfigError::invalid_color(s, "invalid g"))?;
-        let b = parts[2].parse::<u8>()
+        let b = parts[2]
+            .parse::<u8>()
             .map_err(|_| ConfigError::invalid_color(s, "invalid b"))?;
 
         Ok(Color::from_rgb(r, g, b))
@@ -604,22 +615,22 @@ impl Config {
     fn parse_vec2_string(&self, s: &str) -> ParseResult<Vec2> {
         // Try (x, y) format
         if s.starts_with('(') && s.ends_with(')') {
-            let inner = &s[1..s.len()-1];
+            let inner = &s[1..s.len() - 1];
             let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
 
-            if parts.len() == 2 {
-                if let (Ok(x), Ok(y)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
-                    return Ok(Vec2::new(x, y));
-                }
+            if parts.len() == 2
+                && let (Ok(x), Ok(y)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>())
+            {
+                return Ok(Vec2::new(x, y));
             }
         } else if s.contains(',') {
             // Try x, y format without parentheses
             let parts: Vec<&str> = s.split(',').map(|p| p.trim()).collect();
 
-            if parts.len() == 2 {
-                if let (Ok(x), Ok(y)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
-                    return Ok(Vec2::new(x, y));
-                }
+            if parts.len() == 2
+                && let (Ok(x), Ok(y)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>())
+            {
+                return Ok(Vec2::new(x, y));
             }
         }
 
@@ -649,7 +660,8 @@ impl Config {
 
     /// Get a configuration value
     pub fn get(&self, key: &str) -> ParseResult<&ConfigValue> {
-        self.values.get(key)
+        self.values
+            .get(key)
             .map(|entry| &entry.value)
             .ok_or_else(|| ConfigError::key_not_found(key))
     }
@@ -679,7 +691,6 @@ impl Config {
     pub fn set(&mut self, key: impl Into<String>, value: ConfigValue) {
         let key = key.into();
         let raw = value.to_string();
-        self.values.insert(key.clone(), ConfigValueEntry::new(value, raw.clone()));
 
         // Update document tree if mutation feature is enabled
         #[cfg(feature = "mutation")]
@@ -688,6 +699,8 @@ impl Config {
                 let _ = doc.update_or_insert_value(&key, &raw);
             }
         }
+
+        self.values.insert(key, ConfigValueEntry::new(value, raw));
     }
 
     /// Check if a key exists
@@ -709,10 +722,8 @@ impl Config {
         F: Fn(&crate::handlers::HandlerContext) -> ParseResult<()> + 'static,
     {
         let keyword = keyword.into();
-        self.handlers.register_global(
-            keyword.clone(),
-            FunctionHandler::new(keyword, handler),
-        );
+        self.handlers
+            .register_global(keyword.clone(), FunctionHandler::new(keyword, handler));
     }
 
     /// Register a category-specific handler
@@ -721,8 +732,7 @@ impl Config {
         category: impl Into<String>,
         keyword: impl Into<String>,
         handler: H,
-    )
-    where
+    ) where
         H: Handler + 'static,
     {
         self.handlers.register_category(category, keyword, handler);
@@ -734,8 +744,7 @@ impl Config {
         category: impl Into<String>,
         keyword: impl Into<String>,
         handler: F,
-    )
-    where
+    ) where
         F: Fn(&crate::handlers::HandlerContext) -> ParseResult<()> + 'static,
     {
         let keyword_str = keyword.into();
@@ -771,7 +780,11 @@ impl Config {
     }
 
     /// Get a special category instance
-    pub fn get_special_category(&self, category: &str, key: &str) -> ParseResult<HashMap<String, &ConfigValue>> {
+    pub fn get_special_category(
+        &self,
+        category: &str,
+        key: &str,
+    ) -> ParseResult<HashMap<String, &ConfigValue>> {
         let instance = self.special_categories.get_instance(category, key)?;
         let mut result = HashMap::new();
 
@@ -925,7 +938,9 @@ impl Config {
     /// ```
     #[cfg(feature = "mutation")]
     pub fn remove(&mut self, key: &str) -> ParseResult<ConfigValue> {
-        let entry = self.values.remove(key)
+        let entry = self
+            .values
+            .remove(key)
             .ok_or_else(|| ConfigError::key_not_found(key))?;
 
         #[cfg(feature = "mutation")]
@@ -1043,13 +1058,17 @@ impl Config {
     /// # }
     /// ```
     #[cfg(feature = "mutation")]
-    pub fn add_handler_call(&mut self, handler: impl Into<String>, value: String) -> ParseResult<()> {
+    pub fn add_handler_call(
+        &mut self,
+        handler: impl Into<String>,
+        value: String,
+    ) -> ParseResult<()> {
         let handler = handler.into();
 
         // Update in-memory state
         self.handler_calls
             .entry(handler.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(value.clone());
 
         #[cfg(feature = "mutation")]
@@ -1083,14 +1102,12 @@ impl Config {
     /// ```
     #[cfg(feature = "mutation")]
     pub fn remove_handler_calls(&mut self, handler: &str) -> Option<Vec<String>> {
-        let calls = self.handler_calls.remove(handler);
-
         // TODO: Remove from document tree
         // if let Some(doc) = &mut self.document {
         //     let _ = doc.remove_handler_calls(handler);
         // }
 
-        calls
+        self.handler_calls.remove(handler)
     }
 
     /// Remove a specific handler call by index.
@@ -1117,7 +1134,9 @@ impl Config {
     /// ```
     #[cfg(feature = "mutation")]
     pub fn remove_handler_call(&mut self, handler: &str, index: usize) -> ParseResult<String> {
-        let calls = self.handler_calls.get_mut(handler)
+        let calls = self
+            .handler_calls
+            .get_mut(handler)
             .ok_or_else(|| ConfigError::handler(handler, "no calls found"))?;
 
         if index >= calls.len() {
@@ -1126,10 +1145,11 @@ impl Config {
 
         let value = calls.remove(index);
 
-        // TODO: Remove from document tree
-        // if let Some(doc) = &mut self.document {
-        //     doc.remove_handler_call_at(handler, index)?;
-        // }
+        // Remove from document tree for serialization consistency
+        if let Some(doc) = &mut self.document {
+            // Ignore error if document doesn't have this handler (e.g., manually added)
+            let _ = doc.remove_handler_call(handler, index);
+        }
 
         Ok(value)
     }
@@ -1170,22 +1190,17 @@ impl Config {
     ) -> ParseResult<crate::mutation::MutableCategoryInstance<'_>> {
         // Verify it exists
         if !self.special_categories.instance_exists(category, key) {
-            return Err(ConfigError::category_not_found(category, Some(key.to_string())));
+            return Err(ConfigError::category_not_found(
+                category,
+                Some(key.to_string()),
+            ));
         }
 
-        // We need to use unsafe here to work around the borrow checker
-        // This is safe because we're only accessing disjoint fields
-        let manager_ptr = &mut self.special_categories as *mut SpecialCategoryManager;
-        let doc_ptr = &mut self.document as *mut Option<crate::document::ConfigDocument>;
-
-        unsafe {
-            Ok(crate::mutation::MutableCategoryInstance::new(
-                category.to_string(),
-                key.to_string(),
-                &mut *manager_ptr,
-                (*doc_ptr).as_mut(),
-            ))
-        }
+        Ok(crate::mutation::MutableCategoryInstance::new(
+            category.to_string(),
+            key.to_string(),
+            &mut self.special_categories,
+        ))
     }
 
     /// Remove a special category instance.
@@ -1217,10 +1232,11 @@ impl Config {
     ) -> ParseResult<()> {
         self.special_categories.remove_instance(category, key)?;
 
-        // TODO: Remove from document tree
-        // if let Some(doc) = &mut self.document {
-        //     doc.remove_special_category_instance(category, key)?;
-        // }
+        // Remove from document tree for serialization consistency
+        if let Some(doc) = &mut self.document {
+            // Ignore error if document doesn't have this category (e.g., manually added)
+            let _ = doc.remove_special_category_instance(category, key);
+        }
 
         Ok(())
     }
@@ -1287,8 +1303,11 @@ impl Config {
     /// ```
     #[cfg(feature = "mutation")]
     pub fn save(&self) -> ParseResult<()> {
-        let path = self.source_file.as_ref()
-            .ok_or_else(|| ConfigError::custom("No source file associated with this config. Use save_as() instead."))?;
+        let path = self.source_file.as_ref().ok_or_else(|| {
+            ConfigError::custom(
+                "No source file associated with this config. Use save_as() instead.",
+            )
+        })?;
 
         let content = self.serialize();
         std::fs::write(path, content)

@@ -30,7 +30,7 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 - 🎨 **Expression Escaping** - Escape expressions with `\{{}}` or `{\{}}` for literal braces
 - 🔄 **Mutation & Serialization** - Modify config values and save back to files (optional)
 - 🎯 **Windowrule v3 / Layerrule v2** - Full support for new special category syntax with 85+ registered properties
-- ✅ **Fully Tested** - 148 tests covering all features
+- ✅ **Fully Tested** - 171 tests covering all features
 
 ## Installation
 
@@ -38,7 +38,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.2.0"
+hyprlang = "0.2.1"
 ```
 
 ### Optional Features
@@ -49,7 +49,7 @@ Enable the `hyprland` feature to get a high-level `Hyprland` struct with pre-con
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.2.0", features = ["hyprland"] }
+hyprlang = { version = "0.2.1", features = ["hyprland"] }
 ```
 
 This feature provides:
@@ -63,7 +63,7 @@ Enable the `mutation` feature to modify configuration values and serialize confi
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.2.0", features = ["mutation"] }
+hyprlang = { version = "0.2.1", features = ["mutation"] }
 ```
 
 This feature provides:
@@ -938,16 +938,17 @@ cargo test
 cargo test --all-features
 ```
 
-The project includes **148 tests** with 100% pass rate:
+The project includes **171 tests** with 100% pass rate:
 - 52 unit tests covering core functionality
 - 11 conditional directive tests
 - 11 expression escaping tests
 - 15 windowrule v3 / layerrule v2 tests
 - 12 Hyprland config tests
-- 6 mutation tests
+- 10 mutation & round-trip serialization tests
+- 19 parsing edge case tests
 - 41 documentation tests
 
-All tests from the original Hyprlang C++ implementation have been ported and pass successfully, plus additional tests for new features like expression escaping, negated conditionals, and windowrule v3 syntax.
+All tests from the original Hyprlang C++ implementation have been ported and pass successfully, plus additional tests for new features like expression escaping, negated conditionals, windowrule v3 syntax, and comprehensive edge case coverage.
 
 ## Grammar
 
