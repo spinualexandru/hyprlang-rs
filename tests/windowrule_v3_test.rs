@@ -6,7 +6,8 @@ use hyprlang::Hyprland;
 fn test_basic_windowrule_v3() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[float-terminals] {
             match:class = ^(kitty|alacritty)$
             match:floating = false
@@ -15,7 +16,9 @@ fn test_basic_windowrule_v3() {
             size = 800 600
             center = true
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     // Check that the windowrule was registered
     let names = hypr.windowrule_names();
@@ -26,7 +29,10 @@ fn test_basic_windowrule_v3() {
     let rule = hypr.get_windowrule("float-terminals").unwrap();
 
     // Check match properties
-    assert_eq!(rule.get_string("match:class").unwrap(), "^(kitty|alacritty)$");
+    assert_eq!(
+        rule.get_string("match:class").unwrap(),
+        "^(kitty|alacritty)$"
+    );
     assert_eq!(rule.get_int("match:floating").unwrap(), 0); // false = 0
 
     // Check effect properties
@@ -39,7 +45,8 @@ fn test_basic_windowrule_v3() {
 fn test_multiple_windowrules() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[float-rule] {
             match:class = ^(kitty)$
             float = true
@@ -50,7 +57,9 @@ fn test_multiple_windowrules() {
             opacity = 0.95
             rounding = 10
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let names = hypr.windowrule_names();
     assert_eq!(names.len(), 2);
@@ -71,13 +80,16 @@ fn test_multiple_windowrules() {
 fn test_layerrule_v2() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         layerrule[blur-waybar] {
             match:namespace = waybar
             blur = true
             ignorealpha = 0.5
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let names = hypr.layerrule_names();
     assert_eq!(names.len(), 1);
@@ -93,7 +105,8 @@ fn test_layerrule_v2() {
 fn test_windowrule_with_complex_properties() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[complex-rule] {
             match:title = ^(.*Firefox.*)$
             match:xwayland = true
@@ -108,7 +121,9 @@ fn test_windowrule_with_complex_properties() {
             no_shadow = false
             suppressevent = maximize fullscreen
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("complex-rule").unwrap();
 
@@ -129,7 +144,10 @@ fn test_windowrule_with_complex_properties() {
     assert_eq!(rule.get_float("opacity").unwrap(), 0.9);
     assert_eq!(rule.get_int("no_blur").unwrap(), 0); // false = 0
     assert_eq!(rule.get_int("no_shadow").unwrap(), 0); // false = 0
-    assert_eq!(rule.get_string("suppressevent").unwrap(), "maximize fullscreen");
+    assert_eq!(
+        rule.get_string("suppressevent").unwrap(),
+        "maximize fullscreen"
+    );
 }
 
 #[test]
@@ -137,10 +155,13 @@ fn test_backward_compat_handler_syntax() {
     let mut hypr = Hyprland::new();
 
     // Old v2 handler syntax should still be accepted
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrulev2 = float, class:^(kitty)$
         windowrulev2 = size 800 600, class:^(kitty)$
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let v2_rules = hypr.all_windowrulesv2();
     assert_eq!(v2_rules.len(), 2);
@@ -150,7 +171,8 @@ fn test_backward_compat_handler_syntax() {
 fn test_mixed_v2_and_v3_syntax() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         # Old v2 syntax (deprecated)
         windowrulev2 = float, class:^(old)$
 
@@ -159,7 +181,9 @@ fn test_mixed_v2_and_v3_syntax() {
             match:class = ^(new)$
             float = test_yes
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     // Both should work
     let v2_rules = hypr.all_windowrulesv2();
@@ -183,11 +207,14 @@ fn test_minimal_windowrule() {
     let mut hypr = Hyprland::new();
 
     // Special categories need at least one property
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[minimal-rule] {
             float = enabled
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("minimal-rule").unwrap();
     // Should have the one property
@@ -198,11 +225,14 @@ fn test_minimal_windowrule() {
 fn test_windowrule_default_values() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[test-defaults] {
             match:class = test
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("test-defaults").unwrap();
 
@@ -224,7 +254,8 @@ fn test_windowrule_default_values() {
 fn test_all_windowrule_match_properties() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[all-match-props] {
             match:class = test-class
             match:title = test-title
@@ -246,15 +277,23 @@ fn test_all_windowrule_match_properties() {
             match:namespace = test-namespace
             match:exec_token = test-token
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("all-match-props").unwrap();
 
     // Verify all 19 match properties can be accessed
     assert_eq!(rule.get_string("match:class").unwrap(), "test-class");
     assert_eq!(rule.get_string("match:title").unwrap(), "test-title");
-    assert_eq!(rule.get_string("match:initial_class").unwrap(), "test-init-class");
-    assert_eq!(rule.get_string("match:initial_title").unwrap(), "test-init-title");
+    assert_eq!(
+        rule.get_string("match:initial_class").unwrap(),
+        "test-init-class"
+    );
+    assert_eq!(
+        rule.get_string("match:initial_title").unwrap(),
+        "test-init-title"
+    );
     assert_eq!(rule.get_int("match:floating").unwrap(), 1);
     assert_eq!(rule.get_string("match:tag").unwrap(), "test-tag");
     assert_eq!(rule.get_int("match:xwayland").unwrap(), 1);
@@ -268,7 +307,10 @@ fn test_all_windowrule_match_properties() {
     assert_eq!(rule.get_int("match:on_workspace").unwrap(), 5);
     assert_eq!(rule.get_string("match:content").unwrap(), "normal");
     assert_eq!(rule.get_string("match:xdg_tag").unwrap(), "test-xdg");
-    assert_eq!(rule.get_string("match:namespace").unwrap(), "test-namespace");
+    assert_eq!(
+        rule.get_string("match:namespace").unwrap(),
+        "test-namespace"
+    );
     assert_eq!(rule.get_string("match:exec_token").unwrap(), "test-token");
 }
 
@@ -276,7 +318,8 @@ fn test_all_windowrule_match_properties() {
 fn test_windowrule_effect_properties_static() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[static-effects] {
             match:class = test
 
@@ -299,7 +342,9 @@ fn test_windowrule_effect_properties_static() {
             content = browser
             noclosefor = 5
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("static-effects").unwrap();
 
@@ -326,7 +371,8 @@ fn test_windowrule_effect_properties_static() {
 fn test_windowrule_effect_properties_dynamic() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[dynamic-effects] {
             match:class = test
 
@@ -368,7 +414,9 @@ fn test_windowrule_effect_properties_dynamic() {
             scroll_touchpad = 1.0
             stay_focused = true
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("dynamic-effects").unwrap();
 
@@ -393,7 +441,8 @@ fn test_windowrule_effect_properties_dynamic() {
 fn test_windowrule_property_aliases() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         windowrule[aliases-test] {
             match:class = test
 
@@ -407,7 +456,9 @@ fn test_windowrule_property_aliases() {
             max_size = 1920 1080
             maxsize = 1280 720
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_windowrule("aliases-test").unwrap();
 
@@ -425,7 +476,8 @@ fn test_windowrule_property_aliases() {
 fn test_all_layerrule_properties() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         layerrule[all-props] {
             # Match properties
             match:namespace = waybar
@@ -443,7 +495,9 @@ fn test_all_layerrule_properties() {
             noanim = false
             xray = 1
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_layerrule("all-props").unwrap();
 
@@ -468,11 +522,14 @@ fn test_all_layerrule_properties() {
 fn test_layerrule_default_values() {
     let mut hypr = Hyprland::new();
 
-    hypr.parse(r#"
+    hypr.parse(
+        r#"
         layerrule[defaults-test] {
             match:namespace = test
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let rule = hypr.get_layerrule("defaults-test").unwrap();
 

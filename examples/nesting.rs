@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use hyprlang::{Color, Config, ConfigOptions, ConfigValue};
+use std::collections::HashMap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build path to the test config
@@ -190,7 +190,6 @@ fn pretty_print_config(config: &Config) {
 
     println!();
 }
-
 
 fn format_value(value: &ConfigValue) -> String {
     match value {

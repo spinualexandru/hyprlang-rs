@@ -147,31 +147,35 @@ impl SpecialCategoryManager {
         category_name: &str,
         key: Option<String>,
     ) -> ParseResult<String> {
-        let descriptor = self.descriptors.get(category_name)
+        let descriptor = self
+            .descriptors
+            .get(category_name)
             .ok_or_else(|| ConfigError::category_not_found(category_name, None))?
             .clone(); // Clone to avoid borrow checker issues
 
         let instance_key = match descriptor.category_type {
-            SpecialCategoryType::Keyed => {
-                key.ok_or_else(|| ConfigError::custom(
-                    format!("Keyed category '{}' requires a key", category_name)
-                ))?
-            }
+            SpecialCategoryType::Keyed => key.ok_or_else(|| {
+                ConfigError::custom(format!("Keyed category '{}' requires a key", category_name))
+            })?,
             SpecialCategoryType::Static => {
                 if key.is_some() {
-                    return Err(ConfigError::custom(
-                        format!("Static category '{}' cannot have a key", category_name)
-                    ));
+                    return Err(ConfigError::custom(format!(
+                        "Static category '{}' cannot have a key",
+                        category_name
+                    )));
                 }
                 "static".to_string()
             }
             SpecialCategoryType::Anonymous => {
                 if key.is_some() {
-                    return Err(ConfigError::custom(
-                        format!("Anonymous category '{}' cannot have an explicit key", category_name)
-                    ));
+                    return Err(ConfigError::custom(format!(
+                        "Anonymous category '{}' cannot have an explicit key",
+                        category_name
+                    )));
                 }
-                let counter = self.anonymous_counters.entry(category_name.to_string())
+                let counter = self
+                    .anonymous_counters
+                    .entry(category_name.to_string())
                     .or_insert(0);
                 let key = format!("anonymous_{}", counter);
                 *counter += 1;
@@ -187,12 +191,13 @@ impl SpecialCategoryManager {
             let raw = default_value.to_string();
             instance.set(
                 prop_name.clone(),
-                ConfigValueEntry::new(default_value.clone(), raw)
+                ConfigValueEntry::new(default_value.clone(), raw),
             );
         }
 
-        self.instances.entry(category_name.to_string())
-            .or_insert_with(HashMap::new)
+        self.instances
+            .entry(category_name.to_string())
+            .or_default()
             .insert(instance_key.clone(), instance);
 
         Ok(instance_key)
@@ -204,7 +209,8 @@ impl SpecialCategoryManager {
         category_name: &str,
         key: &str,
     ) -> ParseResult<&SpecialCategoryInstance> {
-        self.instances.get(category_name)
+        self.instances
+            .get(category_name)
             .and_then(|instances| instances.get(key))
             .ok_or_else(|| ConfigError::category_not_found(category_name, Some(key.to_string())))
     }
@@ -215,21 +221,24 @@ impl SpecialCategoryManager {
         category_name: &str,
         key: &str,
     ) -> ParseResult<&mut SpecialCategoryInstance> {
-        self.instances.get_mut(category_name)
+        self.instances
+            .get_mut(category_name)
             .and_then(|instances| instances.get_mut(key))
             .ok_or_else(|| ConfigError::category_not_found(category_name, Some(key.to_string())))
     }
 
     /// Get all keys for a special category
     pub fn list_keys(&self, category_name: &str) -> Vec<String> {
-        self.instances.get(category_name)
+        self.instances
+            .get(category_name)
             .map(|instances| instances.keys().cloned().collect())
             .unwrap_or_default()
     }
 
     /// Get all instances for a category
     pub fn get_all_instances(&self, category_name: &str) -> Vec<&SpecialCategoryInstance> {
-        self.instances.get(category_name)
+        self.instances
+            .get(category_name)
             .map(|instances| instances.values().collect())
             .unwrap_or_default()
     }
@@ -237,8 +246,9 @@ impl SpecialCategoryManager {
     /// Remove a special category instance
     pub fn remove_instance(&mut self, category_name: &str, key: &str) -> ParseResult<()> {
         if let Some(instances) = self.instances.get_mut(category_name) {
-            instances.remove(key)
-                .ok_or_else(|| ConfigError::category_not_found(category_name, Some(key.to_string())))?;
+            instances.remove(key).ok_or_else(|| {
+                ConfigError::category_not_found(category_name, Some(key.to_string()))
+            })?;
             Ok(())
         } else {
             Err(ConfigError::category_not_found(category_name, None))
@@ -247,7 +257,8 @@ impl SpecialCategoryManager {
 
     /// Check if a category instance exists
     pub fn instance_exists(&self, category_name: &str, key: &str) -> bool {
-        self.instances.get(category_name)
+        self.instances
+            .get(category_name)
             .map(|instances| instances.contains_key(key))
             .unwrap_or(false)
     }
@@ -274,10 +285,14 @@ mod tests {
         let mut manager = SpecialCategoryManager::new();
         manager.register(SpecialCategoryDescriptor::keyed("device", "name"));
 
-        let key1 = manager.create_instance("device", Some("mouse".to_string())).unwrap();
+        let key1 = manager
+            .create_instance("device", Some("mouse".to_string()))
+            .unwrap();
         assert_eq!(key1, "mouse");
 
-        let key2 = manager.create_instance("device", Some("keyboard".to_string())).unwrap();
+        let key2 = manager
+            .create_instance("device", Some("keyboard".to_string()))
+            .unwrap();
         assert_eq!(key2, "keyboard");
 
         let keys = manager.list_keys("device");

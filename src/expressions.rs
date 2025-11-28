@@ -42,13 +42,15 @@ impl ExpressionEvaluator {
                 Some(Token::Plus) => {
                     tokens.remove(0);
                     let right = self.parse_multiplicative(tokens)?;
-                    result = result.checked_add(right)
+                    result = result
+                        .checked_add(right)
                         .ok_or_else(|| ConfigError::expression("", "integer overflow"))?;
                 }
                 Some(Token::Minus) => {
                     tokens.remove(0);
                     let right = self.parse_multiplicative(tokens)?;
-                    result = result.checked_sub(right)
+                    result = result
+                        .checked_sub(right)
                         .ok_or_else(|| ConfigError::expression("", "integer overflow"))?;
                 }
                 _ => break,
@@ -66,7 +68,8 @@ impl ExpressionEvaluator {
                 Some(Token::Multiply) => {
                     tokens.remove(0);
                     let right = self.parse_primary(tokens)?;
-                    result = result.checked_mul(right)
+                    result = result
+                        .checked_mul(right)
                         .ok_or_else(|| ConfigError::expression("", "integer overflow"))?;
                 }
                 Some(Token::Divide) => {
@@ -75,7 +78,8 @@ impl ExpressionEvaluator {
                     if right == 0 {
                         return Err(ConfigError::expression("", "division by zero"));
                     }
-                    result = result.checked_div(right)
+                    result = result
+                        .checked_div(right)
                         .ok_or_else(|| ConfigError::expression("", "integer overflow"))?;
                 }
                 _ => break,
@@ -93,11 +97,11 @@ impl ExpressionEvaluator {
         let token = tokens.remove(0);
         match token {
             Token::Number(n) => Ok(n),
-            Token::Variable(name) => {
-                self.variables.get(&name)
-                    .copied()
-                    .ok_or_else(|| ConfigError::variable_not_found(&name))
-            }
+            Token::Variable(name) => self
+                .variables
+                .get(&name)
+                .copied()
+                .ok_or_else(|| ConfigError::variable_not_found(&name)),
             Token::LeftParen => {
                 let result = self.parse_additive(tokens)?;
                 if tokens.is_empty() || !matches!(tokens.first(), Some(Token::RightParen)) {
@@ -106,7 +110,10 @@ impl ExpressionEvaluator {
                 tokens.remove(0); // consume )
                 Ok(result)
             }
-            _ => Err(ConfigError::expression("", format!("unexpected token: {:?}", token))),
+            _ => Err(ConfigError::expression(
+                "",
+                format!("unexpected token: {:?}", token),
+            )),
         }
     }
 
@@ -174,7 +181,11 @@ impl ExpressionEvaluator {
         Ok(tokens)
     }
 
-    fn read_number(&self, chars: &mut std::iter::Peekable<std::str::Chars>, negative: bool) -> ParseResult<i64> {
+    fn read_number(
+        &self,
+        chars: &mut std::iter::Peekable<std::str::Chars>,
+        negative: bool,
+    ) -> ParseResult<i64> {
         let mut num_str = String::new();
         if negative {
             num_str.push('-');
@@ -189,11 +200,15 @@ impl ExpressionEvaluator {
             }
         }
 
-        num_str.parse::<i64>()
+        num_str
+            .parse::<i64>()
             .map_err(|_| ConfigError::expression(&num_str, "invalid number"))
     }
 
-    fn read_identifier(&self, chars: &mut std::iter::Peekable<std::str::Chars>) -> ParseResult<String> {
+    fn read_identifier(
+        &self,
+        chars: &mut std::iter::Peekable<std::str::Chars>,
+    ) -> ParseResult<String> {
         let mut ident = String::new();
 
         while let Some(&ch) = chars.peek() {

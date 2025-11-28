@@ -35,8 +35,8 @@ impl DirectiveProcessor {
                 let var_name = var_name.trim();
 
                 // Check for negation (!)
-                let (negated, var_name) = if var_name.starts_with('!') {
-                    (true, var_name[1..].trim())
+                let (negated, var_name) = if let Some(stripped) = var_name.strip_prefix('!') {
+                    (true, stripped.trim())
                 } else {
                     (false, var_name)
                 };
@@ -143,7 +143,8 @@ impl SourceResolver {
         };
 
         // Canonicalize to resolve . and .. components
-        resolved.canonicalize()
+        resolved
+            .canonicalize()
             .map_err(|e| ConfigError::io(path, format!("failed to resolve path: {}", e)))
     }
 
@@ -206,8 +207,8 @@ impl MultilineProcessor {
     #[allow(dead_code)]
     pub fn remove_backslash(line: &str) -> String {
         let trimmed = line.trim_end();
-        if trimmed.ends_with('\\') {
-            trimmed[..trimmed.len() - 1].to_string()
+        if let Some(stripped) = trimmed.strip_suffix('\\') {
+            stripped.to_string()
         } else {
             line.to_string()
         }
@@ -226,16 +227,24 @@ mod tests {
         variables.set("TEST".to_string(), "value".to_string());
 
         // Variable exists
-        processor.process_directive("if", Some("TEST"), &variables).unwrap();
+        processor
+            .process_directive("if", Some("TEST"), &variables)
+            .unwrap();
         assert!(processor.should_execute());
 
-        processor.process_directive("endif", None, &variables).unwrap();
+        processor
+            .process_directive("endif", None, &variables)
+            .unwrap();
 
         // Variable doesn't exist
-        processor.process_directive("if", Some("MISSING"), &variables).unwrap();
+        processor
+            .process_directive("if", Some("MISSING"), &variables)
+            .unwrap();
         assert!(!processor.should_execute());
 
-        processor.process_directive("endif", None, &variables).unwrap();
+        processor
+            .process_directive("endif", None, &variables)
+            .unwrap();
     }
 
     #[test]
@@ -245,10 +254,14 @@ mod tests {
 
         assert!(!processor.should_suppress_errors());
 
-        processor.process_directive("noerror", Some("true"), &variables).unwrap();
+        processor
+            .process_directive("noerror", Some("true"), &variables)
+            .unwrap();
         assert!(processor.should_suppress_errors());
 
-        processor.process_directive("noerror", Some("false"), &variables).unwrap();
+        processor
+            .process_directive("noerror", Some("false"), &variables)
+            .unwrap();
         assert!(!processor.should_suppress_errors());
     }
 

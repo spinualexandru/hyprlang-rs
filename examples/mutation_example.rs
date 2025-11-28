@@ -16,7 +16,8 @@ fn run_example() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::new();
 
     // Parse some initial configuration
-    config.parse(r#"
+    config.parse(
+        r#"
 # Configuration for my app
 $GAPS = 10
 $SCALE = 2
@@ -36,7 +37,8 @@ decoration {
         range = 20
     }
 }
-"#)?;
+"#,
+    )?;
 
     println!("📖 Initial configuration loaded\n");
 
@@ -70,7 +72,11 @@ decoration {
     if let Some(mut file_manager) = config.get_variable_mut("FILE_MANAGER") {
         let old_value = file_manager.get().to_string();
         file_manager.set("thunar")?;
-        println!("✓ Changed ${}: {} -> thunar", file_manager.name(), old_value);
+        println!(
+            "✓ Changed ${}: {} -> thunar",
+            file_manager.name(),
+            old_value
+        );
     }
 
     // Add a new variable
@@ -109,16 +115,25 @@ decoration {
     println!("  border_size = {}", config.get_int("general:border_size")?);
 
     assert_eq!(config.get_float("general:active_opacity")?, 1.0);
-    println!("  active_opacity = {}", config.get_float("general:active_opacity")?);
+    println!(
+        "  active_opacity = {}",
+        config.get_float("general:active_opacity")?
+    );
 
     assert_eq!(config.get_variable("GAPS"), Some("15"));
     println!("  $GAPS = {}", config.get_variable("GAPS").unwrap());
 
     assert_eq!(config.get_variable("FILE_MANAGER"), Some("thunar"));
-    println!("  $FILE_MANAGER = {}", config.get_variable("FILE_MANAGER").unwrap());
+    println!(
+        "  $FILE_MANAGER = {}",
+        config.get_variable("FILE_MANAGER").unwrap()
+    );
 
     assert!(config.get_handler_calls("bind").is_some());
-    println!("  bind handlers: {:?}", config.get_handler_calls("bind").unwrap());
+    println!(
+        "  bind handlers: {:?}",
+        config.get_handler_calls("bind").unwrap()
+    );
 
     // ========== SERIALIZATION ==========
     println!("\n💾 Serializing configuration...\n");

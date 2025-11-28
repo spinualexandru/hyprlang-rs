@@ -375,7 +375,10 @@ impl<'a> RuleInstance<'a> {
 
     /// Get a value by key
     pub fn get(&self, key: &str) -> ParseResult<&ConfigValue> {
-        self.values.get(key).copied().ok_or_else(|| ConfigError::key_not_found(key))
+        self.values
+            .get(key)
+            .copied()
+            .ok_or_else(|| ConfigError::key_not_found(key))
     }
 
     /// Get a string value
@@ -405,7 +408,7 @@ impl<'a> RuleInstance<'a> {
     /// Get a color value
     pub fn get_color(&self, key: &str) -> ParseResult<Color> {
         match self.get(key)? {
-            ConfigValue::Color(c) => Ok(c.clone()),
+            ConfigValue::Color(c) => Ok(*c),
             v => Err(ConfigError::type_error(key, "Color", v.type_name())),
         }
     }
@@ -515,25 +518,17 @@ impl Hyprland {
     /// Register all Hyprland-specific special categories
     fn register_all_special_categories(config: &mut Config) {
         // Device is a keyed category: device[name] { ... }
-        config.register_special_category(
-            SpecialCategoryDescriptor::keyed("device", "name")
-        );
+        config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
 
         // Monitor is a keyed category: monitor[name] { ... } (for per-monitor settings)
-        config.register_special_category(
-            SpecialCategoryDescriptor::keyed("monitor", "name")
-        );
+        config.register_special_category(SpecialCategoryDescriptor::keyed("monitor", "name"));
 
         // Windowrule v3: windowrule { name = ... }
-        config.register_special_category(
-            SpecialCategoryDescriptor::keyed("windowrule", "name")
-        );
+        config.register_special_category(SpecialCategoryDescriptor::keyed("windowrule", "name"));
         Self::register_windowrule_properties(config);
 
         // Layerrule v2: layerrule { name = ... }
-        config.register_special_category(
-            SpecialCategoryDescriptor::keyed("layerrule", "name")
-        );
+        config.register_special_category(SpecialCategoryDescriptor::keyed("layerrule", "name"));
         Self::register_layerrule_properties(config);
     }
 
@@ -545,32 +540,32 @@ impl Hyprland {
 
         // Match properties (19 total from Rule.hpp enum eRuleProperty)
         let match_props = [
-            "class",                      // Window class (regex)
-            "title",                      // Window title (regex)
-            "initial_class",              // Initial class on creation
-            "initial_title",              // Initial title on creation
-            "floating",                   // Is floating (bool)
-            "tag",                        // Window tag
-            "xwayland",                   // Is XWayland (bool)
-            "fullscreen",                 // Is fullscreen (bool)
-            "pinned",                     // Is pinned (bool)
-            "focus",                      // Is focused (bool)
-            "group",                      // Is in group (bool)
-            "modal",                      // Is modal (bool)
-            "fullscreenstate_internal",   // Internal fullscreen state
-            "fullscreenstate_client",     // Client fullscreen state
-            "on_workspace",               // On specific workspace
-            "content",                    // Content type
-            "xdg_tag",                    // XDG tag
-            "namespace",                  // Namespace (for layer surfaces)
-            "exec_token",                 // Exec token
+            "class",                    // Window class (regex)
+            "title",                    // Window title (regex)
+            "initial_class",            // Initial class on creation
+            "initial_title",            // Initial title on creation
+            "floating",                 // Is floating (bool)
+            "tag",                      // Window tag
+            "xwayland",                 // Is XWayland (bool)
+            "fullscreen",               // Is fullscreen (bool)
+            "pinned",                   // Is pinned (bool)
+            "focus",                    // Is focused (bool)
+            "group",                    // Is in group (bool)
+            "modal",                    // Is modal (bool)
+            "fullscreenstate_internal", // Internal fullscreen state
+            "fullscreenstate_client",   // Client fullscreen state
+            "on_workspace",             // On specific workspace
+            "content",                  // Content type
+            "xdg_tag",                  // XDG tag
+            "namespace",                // Namespace (for layer surfaces)
+            "exec_token",               // Exec token
         ];
 
         for prop in match_props {
             config.register_special_category_value(
                 "windowrule",
                 format!("match:{}", prop),
-                ConfigValue::String(String::new())
+                ConfigValue::String(String::new()),
             );
         }
 
@@ -578,52 +573,90 @@ impl Hyprland {
         // Note: Many properties have aliases (e.g., border_color / bordercolor)
         let effect_props = [
             // Static effects (applied once)
-            "float", "tile", "fullscreen", "maximize", "fullscreenstate",
-            "move", "size", "center", "pseudo",
-            "monitor", "workspace", "noinitialfocus", "pin",
-            "group", "suppressevent", "content", "noclosefor",
-
+            "float",
+            "tile",
+            "fullscreen",
+            "maximize",
+            "fullscreenstate",
+            "move",
+            "size",
+            "center",
+            "pseudo",
+            "monitor",
+            "workspace",
+            "noinitialfocus",
+            "pin",
+            "group",
+            "suppressevent",
+            "content",
+            "noclosefor",
             // Dynamic effects (continuously applied)
-            "rounding", "rounding_power", "persistent_size", "animation",
-            "border_color", "bordercolor",  // Aliases
-            "idle_inhibit", "idleinhibit",  // Aliases
+            "rounding",
+            "rounding_power",
+            "persistent_size",
+            "animation",
+            "border_color",
+            "bordercolor", // Aliases
+            "idle_inhibit",
+            "idleinhibit", // Aliases
             "opacity",
             "tag",
-            "max_size", "maxsize",  // Aliases
-            "min_size", "minsize",  // Aliases
-            "border_size", "bordersize",  // Aliases
+            "max_size",
+            "maxsize", // Aliases
+            "min_size",
+            "minsize", // Aliases
+            "border_size",
+            "bordersize", // Aliases
             "allows_input",
             "dim_around",
             "decorate",
             "focus_on_activate",
-            "keep_aspect_ratio", "keepaspectratio",  // Aliases
-            "nearest_neighbor", "nearestneighbor",  // Aliases
-            "no_anim", "noanim",  // Aliases
-            "no_blur", "noblur",  // Aliases
-            "no_dim", "nodim",  // Aliases
-            "no_focus", "nofocus",  // Aliases
-            "no_follow_mouse", "nofollowmouse",  // Aliases
-            "no_max_size", "nomaxsize",  // Aliases
-            "no_shadow", "noshadow",  // Aliases
-            "no_shortcuts_inhibit", "noshortcutsinhibit",  // Aliases
+            "keep_aspect_ratio",
+            "keepaspectratio", // Aliases
+            "nearest_neighbor",
+            "nearestneighbor", // Aliases
+            "no_anim",
+            "noanim", // Aliases
+            "no_blur",
+            "noblur", // Aliases
+            "no_dim",
+            "nodim", // Aliases
+            "no_focus",
+            "nofocus", // Aliases
+            "no_follow_mouse",
+            "nofollowmouse", // Aliases
+            "no_max_size",
+            "nomaxsize", // Aliases
+            "no_shadow",
+            "noshadow", // Aliases
+            "no_shortcuts_inhibit",
+            "noshortcutsinhibit", // Aliases
             "opaque",
-            "force_rgbx", "forcergbx",  // Aliases
-            "sync_fullscreen", "syncfullscreen",  // Aliases
+            "force_rgbx",
+            "forcergbx", // Aliases
+            "sync_fullscreen",
+            "syncfullscreen", // Aliases
             "immediate",
             "xray",
-            "render_unfocused", "renderunfocused",  // Aliases
-            "no_screen_share", "noscreenshare",  // Aliases
-            "no_vrr", "novrr",  // Aliases
-            "scroll_mouse", "scrollmouse",  // Aliases
-            "scroll_touchpad", "scrolltouchpad",  // Aliases
-            "stay_focused", "stayfocused",  // Aliases
+            "render_unfocused",
+            "renderunfocused", // Aliases
+            "no_screen_share",
+            "noscreenshare", // Aliases
+            "no_vrr",
+            "novrr", // Aliases
+            "scroll_mouse",
+            "scrollmouse", // Aliases
+            "scroll_touchpad",
+            "scrolltouchpad", // Aliases
+            "stay_focused",
+            "stayfocused", // Aliases
         ];
 
         for prop in effect_props {
             config.register_special_category_value(
                 "windowrule",
                 prop,
-                ConfigValue::String(String::new())
+                ConfigValue::String(String::new()),
             );
         }
     }
@@ -636,37 +669,37 @@ impl Hyprland {
 
         // Match properties for layer surfaces
         let match_props = [
-            "namespace",   // Layer namespace
-            "address",     // Layer address
-            "class",       // Associated class
-            "title",       // Associated title
-            "monitor",     // Monitor name
-            "layer",       // Layer level (background, bottom, top, overlay)
+            "namespace", // Layer namespace
+            "address",   // Layer address
+            "class",     // Associated class
+            "title",     // Associated title
+            "monitor",   // Monitor name
+            "layer",     // Layer level (background, bottom, top, overlay)
         ];
 
         for prop in match_props {
             config.register_special_category_value(
                 "layerrule",
                 format!("match:{}", prop),
-                ConfigValue::String(String::new())
+                ConfigValue::String(String::new()),
             );
         }
 
         // Effect properties for layer surfaces
         let effect_props = [
-            "blur",           // Enable blur
-            "ignorealpha",    // Ignore alpha
-            "ignorezero",     // Ignore zero alpha
-            "animation",      // Animation style
-            "noanim",        // Disable animations
-            "xray",          // X-ray mode
+            "blur",        // Enable blur
+            "ignorealpha", // Ignore alpha
+            "ignorezero",  // Ignore zero alpha
+            "animation",   // Animation style
+            "noanim",      // Disable animations
+            "xray",        // X-ray mode
         ];
 
         for prop in effect_props {
             config.register_special_category_value(
                 "layerrule",
                 prop,
-                ConfigValue::String(String::new())
+                ConfigValue::String(String::new()),
             );
         }
     }
@@ -961,7 +994,8 @@ impl Hyprland {
     /// let is_float = rule.get_string("float").unwrap();
     /// ```
     pub fn get_windowrule(&self, name: &str) -> ParseResult<RuleInstance<'_>> {
-        self.config.get_special_category("windowrule", name)
+        self.config
+            .get_special_category("windowrule", name)
             .map(RuleInstance::new)
     }
 
@@ -996,7 +1030,8 @@ impl Hyprland {
 
     /// Get a specific layerrule by name (v2 special category syntax)
     pub fn get_layerrule(&self, name: &str) -> ParseResult<RuleInstance<'_>> {
-        self.config.get_special_category("layerrule", name)
+        self.config
+            .get_special_category("layerrule", name)
             .map(RuleInstance::new)
     }
 
@@ -1067,14 +1102,17 @@ mod tests {
     fn test_hyprland_basic_config() {
         let mut hypr = Hyprland::new();
 
-        hypr.parse(r#"
+        hypr.parse(
+            r#"
             general {
                 border_size = 2
                 gaps_in = 5
                 gaps_out = 20
                 layout = dwindle
             }
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_eq!(hypr.general_border_size().unwrap(), 2);
         assert_eq!(hypr.general_gaps_in().unwrap(), "5".to_string());
@@ -1086,10 +1124,13 @@ mod tests {
     fn test_hyprland_binds() {
         let mut hypr = Hyprland::new();
 
-        hypr.parse(r#"
+        hypr.parse(
+            r#"
             bind = SUPER, Q, exec, kitty
             bind = SUPER, C, killactive
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let binds = hypr.all_binds();
         assert_eq!(binds.len(), 2);
@@ -1101,14 +1142,17 @@ mod tests {
     fn test_hyprland_animations() {
         let mut hypr = Hyprland::new();
 
-        hypr.parse(r#"
+        hypr.parse(
+            r#"
             animations {
                 enabled = true
                 animation = windows, 1, 4, default
                 animation = fade, 1, 3, quick
                 bezier = easeOut, 0.23, 1, 0.32, 1
             }
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert!(hypr.animations_enabled().unwrap());
 
@@ -1123,10 +1167,13 @@ mod tests {
     fn test_hyprland_variables() {
         let mut hypr = Hyprland::new();
 
-        hypr.parse(r#"
+        hypr.parse(
+            r#"
             $terminal = kitty
             $mod = SUPER
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let vars = hypr.variables();
         assert_eq!(vars.get("terminal"), Some(&"kitty".to_string()));
@@ -1137,7 +1184,8 @@ mod tests {
     fn test_hyprland_decoration() {
         let mut hypr = Hyprland::new();
 
-        hypr.parse(r#"
+        hypr.parse(
+            r#"
             decoration {
                 rounding = 10
                 active_opacity = 1.0
@@ -1149,7 +1197,9 @@ mod tests {
                     passes = 1
                 }
             }
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         assert_eq!(hypr.decoration_rounding().unwrap(), 10);
         assert_eq!(hypr.decoration_active_opacity().unwrap(), 1.0);

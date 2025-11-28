@@ -1,7 +1,7 @@
-use pest::Parser;
-use pest_derive::Parser;
 use crate::error::ParseResult;
 use crate::types::{Color, Vec2};
+use pest::Parser;
+use pest_derive::Parser;
 
 #[derive(Parser)]
 #[grammar = "hyprlang.pest"]
@@ -17,16 +17,10 @@ pub struct ParsedConfig {
 #[derive(Debug, Clone)]
 pub enum Statement {
     /// Variable definition: $VAR = value
-    VariableDef {
-        name: String,
-        value: String,
-    },
+    VariableDef { name: String, value: String },
 
     /// Assignment: key = value
-    Assignment {
-        key: Vec<String>,
-        value: Value,
-    },
+    Assignment { key: Vec<String>, value: Value },
 
     /// Category block: category { statements }
     CategoryBlock {
@@ -49,9 +43,7 @@ pub enum Statement {
     },
 
     /// Source directive: source = path
-    Source {
-        path: String,
-    },
+    Source { path: String },
 
     /// Comment directive: # hyprlang if/endif/noerror
     CommentDirective {
@@ -165,7 +157,11 @@ impl HyprlangParser {
                     }
                 }
 
-                Ok(Some(Statement::SpecialCategoryBlock { name, key, statements }))
+                Ok(Some(Statement::SpecialCategoryBlock {
+                    name,
+                    key,
+                    statements,
+                }))
             }
 
             Rule::handler_call => {
@@ -182,7 +178,11 @@ impl HyprlangParser {
                 };
 
                 let value = Self::parse_value_to_string(value_pair)?;
-                Ok(Some(Statement::HandlerCall { keyword, flags, value }))
+                Ok(Some(Statement::HandlerCall {
+                    keyword,
+                    flags,
+                    value,
+                }))
             }
 
             Rule::directive => {
@@ -200,7 +200,9 @@ impl HyprlangParser {
                     let directive_text = directive_text.trim_start();
 
                     // Parse directive type and args
-                    if let Some((directive_type, args)) = directive_text.split_once(char::is_whitespace) {
+                    if let Some((directive_type, args)) =
+                        directive_text.split_once(char::is_whitespace)
+                    {
                         return Ok(Some(Statement::CommentDirective {
                             directive_type: directive_type.trim().to_string(),
                             args: Some(args.trim().to_string()),
@@ -238,7 +240,8 @@ impl HyprlangParser {
         match inner.as_rule() {
             Rule::single_value => Self::parse_single_value(inner.into_inner().next().unwrap()),
             Rule::multiline_value => {
-                let lines: Result<Vec<_>, _> = inner.into_inner()
+                let lines: Result<Vec<_>, _> = inner
+                    .into_inner()
                     .map(|p| Self::parse_value_to_string(p))
                     .collect();
                 Ok(Value::Multiline(lines?))
@@ -285,7 +288,9 @@ impl HyprlangParser {
 
     /// Parse configuration and build document tree (for mutation feature)
     #[cfg(feature = "mutation")]
-    pub fn parse_with_document(input: &str) -> ParseResult<(ParsedConfig, crate::document::ConfigDocument)> {
+    pub fn parse_with_document(
+        input: &str,
+    ) -> ParseResult<(ParsedConfig, crate::document::ConfigDocument)> {
         use crate::document::ConfigDocument;
 
         let pairs = HyprlangParser::parse(Rule::file, input)?;
@@ -310,6 +315,7 @@ impl HyprlangParser {
     }
 
     #[cfg(feature = "mutation")]
+    #[allow(clippy::only_used_in_recursion)]
     fn parse_statement_with_node(
         pair: pest::iterators::Pair<Rule>,
         input: &str,
@@ -326,7 +332,10 @@ impl HyprlangParser {
                 let value_pair = inner.next().unwrap();
                 let value = Self::parse_value_to_string(value_pair)?;
 
-                let stmt = Statement::VariableDef { name: name.clone(), value: value.clone() };
+                let stmt = Statement::VariableDef {
+                    name: name.clone(),
+                    value: value.clone(),
+                };
                 let node = DocumentNode::VariableDef {
                     name,
                     value,
@@ -358,7 +367,10 @@ impl HyprlangParser {
                     Value::Multiline(lines) => lines.join(" "),
                 };
 
-                let stmt = Statement::Assignment { key: key.clone(), value };
+                let stmt = Statement::Assignment {
+                    key: key.clone(),
+                    value,
+                };
                 let node = DocumentNode::Assignment {
                     key,
                     value: value_str,
@@ -383,7 +395,10 @@ impl HyprlangParser {
                     }
                 }
 
-                let stmt = Statement::CategoryBlock { name: name.clone(), statements };
+                let stmt = Statement::CategoryBlock {
+                    name: name.clone(),
+                    statements,
+                };
 
                 // Extract just the opening line
                 let raw_open = if let Some(first_line) = raw.lines().next() {
@@ -426,17 +441,15 @@ impl HyprlangParser {
                 let stmt = Statement::SpecialCategoryBlock {
                     name: name.clone(),
                     key: key.clone(),
-                    statements
+                    statements,
                 };
 
                 let raw_open = if let Some(first_line) = raw.lines().next() {
                     first_line.to_string()
+                } else if let Some(k) = &key {
+                    format!("{}[{}] {{", name, k)
                 } else {
-                    if let Some(k) = &key {
-                        format!("{}[{}] {{", name, k)
-                    } else {
-                        format!("{} {{", name)
-                    }
+                    format!("{} {{", name)
                 };
 
                 let close_line = pair.line_col().1;
@@ -468,7 +481,7 @@ impl HyprlangParser {
                 let stmt = Statement::HandlerCall {
                     keyword: keyword.clone(),
                     flags: flags.clone(),
-                    value: value.clone()
+                    value: value.clone(),
                 };
                 let node = DocumentNode::HandlerCall {
                     keyword,
@@ -486,11 +499,7 @@ impl HyprlangParser {
                 let path = Self::parse_value_to_string(value_pair)?;
 
                 let stmt = Statement::Source { path: path.clone() };
-                let node = DocumentNode::Source {
-                    path,
-                    raw,
-                    line,
-                };
+                let node = DocumentNode::Source { path, raw, line };
                 Ok(Some((stmt, Some(node))))
             }
 
@@ -502,17 +511,18 @@ impl HyprlangParser {
                     let directive_text = directive_text.trim_start();
 
                     // Parse directive type and args
-                    let (directive_type, args) = if let Some((dt, a)) = directive_text.split_once(char::is_whitespace) {
-                        (dt.trim().to_string(), Some(a.trim().to_string()))
-                    } else if !directive_text.is_empty() {
-                        (directive_text.trim().to_string(), None)
-                    } else {
-                        return Ok(None);
-                    };
+                    let (directive_type, args) =
+                        if let Some((dt, a)) = directive_text.split_once(char::is_whitespace) {
+                            (dt.trim().to_string(), Some(a.trim().to_string()))
+                        } else if !directive_text.is_empty() {
+                            (directive_text.trim().to_string(), None)
+                        } else {
+                            return Ok(None);
+                        };
 
                     let stmt = Statement::CommentDirective {
                         directive_type: directive_type.clone(),
-                        args: args.clone()
+                        args: args.clone(),
                     };
                     let node = DocumentNode::CommentDirective {
                         directive_type,
@@ -532,5 +542,4 @@ impl HyprlangParser {
             _ => Ok(None),
         }
     }
-
 }

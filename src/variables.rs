@@ -114,14 +114,13 @@ impl VariableManager {
 
     /// Track a dependency between variables
     pub fn add_dependency(&mut self, from: String, to: String) {
-        self.dependencies.entry(from)
-            .or_insert_with(HashSet::new)
-            .insert(to);
+        self.dependencies.entry(from).or_default().insert(to);
     }
 
     /// Get all variables that depend on a given variable
     pub fn get_dependents(&self, var_name: &str) -> Vec<&str> {
-        self.dependencies.iter()
+        self.dependencies
+            .iter()
             .filter(|(_, deps)| deps.contains(var_name))
             .map(|(name, _)| name.as_str())
             .collect()

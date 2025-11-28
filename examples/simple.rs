@@ -13,7 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Access variables
     let file_manager = config.get_variable("fileManager");
-    println!("File Manager: {}", file_manager.unwrap_or(&"Not set".to_string()));
+    println!(
+        "File Manager: {}",
+        file_manager.unwrap_or(&"Not set".to_string())
+    );
 
     // Access configuration values
     let shadow_enabled = config.get_int("decoration:shadow:enabled")?;

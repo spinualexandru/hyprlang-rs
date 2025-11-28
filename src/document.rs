@@ -38,9 +38,7 @@ pub enum DocumentNode {
     },
 
     /// Blank line
-    BlankLine {
-        line: usize,
-    },
+    BlankLine { line: usize },
 
     /// Variable definition: $VAR = value
     VariableDef {
@@ -174,7 +172,7 @@ impl ConfigDocument {
                     };
                     self.key_index
                         .entry(format!("${}", name))
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(location);
                 }
 
@@ -189,10 +187,7 @@ impl ConfigDocument {
                         path: current_path.clone(),
                         node_type: NodeType::Assignment,
                     };
-                    self.key_index
-                        .entry(full_key)
-                        .or_insert_with(Vec::new)
-                        .push(location);
+                    self.key_index.entry(full_key).or_default().push(location);
                 }
 
                 DocumentNode::HandlerCall { keyword, .. } => {
@@ -208,17 +203,26 @@ impl ConfigDocument {
                     };
                     self.key_index
                         .entry(handler_key)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(location);
                 }
 
-                DocumentNode::CategoryBlock { name, nodes: child_nodes, .. } => {
+                DocumentNode::CategoryBlock {
+                    name,
+                    nodes: child_nodes,
+                    ..
+                } => {
                     let mut new_stack = category_stack.to_vec();
                     new_stack.push(name.clone());
                     self.build_index_recursive(child_nodes, &current_path, &new_stack);
                 }
 
-                DocumentNode::SpecialCategoryBlock { name, key: category_key, nodes: child_nodes, .. } => {
+                DocumentNode::SpecialCategoryBlock {
+                    name,
+                    key: category_key,
+                    nodes: child_nodes,
+                    ..
+                } => {
                     let mut new_stack = category_stack.to_vec();
                     if let Some(k) = category_key {
                         new_stack.push(format!("{}[{}]", name, k));
@@ -241,6 +245,7 @@ impl ConfigDocument {
     }
 
     /// Serialize nodes at a specific indentation level
+    #[allow(clippy::only_used_in_recursion)]
     fn serialize_nodes(&self, nodes: &[DocumentNode], output: &mut String, indent: usize) {
         for node in nodes {
             match node {
@@ -265,13 +270,21 @@ impl ConfigDocument {
                     output.push_str(&format!("{}{}\n", "  ".repeat(indent), raw));
                 }
 
-                DocumentNode::CategoryBlock { raw_open, nodes: child_nodes, .. } => {
+                DocumentNode::CategoryBlock {
+                    raw_open,
+                    nodes: child_nodes,
+                    ..
+                } => {
                     output.push_str(&format!("{}{}\n", "  ".repeat(indent), raw_open));
                     self.serialize_nodes(child_nodes, output, indent + 1);
                     output.push_str(&format!("{}}}\n", "  ".repeat(indent)));
                 }
 
-                DocumentNode::SpecialCategoryBlock { raw_open, nodes: child_nodes, .. } => {
+                DocumentNode::SpecialCategoryBlock {
+                    raw_open,
+                    nodes: child_nodes,
+                    ..
+                } => {
                     output.push_str(&format!("{}{}\n", "  ".repeat(indent), raw_open));
                     self.serialize_nodes(child_nodes, output, indent + 1);
                     output.push_str(&format!("{}}}\n", "  ".repeat(indent)));
@@ -299,7 +312,7 @@ impl ConfigDocument {
 
         for (i, &idx) in location.path.iter().enumerate() {
             if idx >= current_nodes.len() {
-                return Err(ConfigError::custom(&format!(
+                return Err(ConfigError::custom(format!(
                     "Invalid node path: index {} out of bounds at level {}",
                     idx, i
                 )));
@@ -310,10 +323,14 @@ impl ConfigDocument {
             // If not the last index, navigate into child nodes
             if i < location.path.len() - 1 {
                 current_nodes = match node.unwrap() {
-                    DocumentNode::CategoryBlock { nodes: child_nodes, .. } => child_nodes,
-                    DocumentNode::SpecialCategoryBlock { nodes: child_nodes, .. } => child_nodes,
+                    DocumentNode::CategoryBlock {
+                        nodes: child_nodes, ..
+                    } => child_nodes,
+                    DocumentNode::SpecialCategoryBlock {
+                        nodes: child_nodes, ..
+                    } => child_nodes,
                     _ => {
-                        return Err(ConfigError::custom(&format!(
+                        return Err(ConfigError::custom(format!(
                             "Node at path index {} is not a category block",
                             i
                         )));
@@ -331,7 +348,7 @@ impl ConfigDocument {
 
         for (i, &idx) in location.path.iter().enumerate() {
             if idx >= current_nodes.len() {
-                return Err(ConfigError::custom(&format!(
+                return Err(ConfigError::custom(format!(
                     "Invalid node path: index {} out of bounds at level {}",
                     idx, i
                 )));
@@ -345,10 +362,14 @@ impl ConfigDocument {
             // Navigate to child nodes
             let node = &mut current_nodes[idx];
             current_nodes = match node {
-                DocumentNode::CategoryBlock { nodes: child_nodes, .. } => child_nodes,
-                DocumentNode::SpecialCategoryBlock { nodes: child_nodes, .. } => child_nodes,
+                DocumentNode::CategoryBlock {
+                    nodes: child_nodes, ..
+                } => child_nodes,
+                DocumentNode::SpecialCategoryBlock {
+                    nodes: child_nodes, ..
+                } => child_nodes,
                 _ => {
-                    return Err(ConfigError::custom(&format!(
+                    return Err(ConfigError::custom(format!(
                         "Node at path index {} is not a category block",
                         i
                     )));
@@ -373,7 +394,12 @@ impl ConfigDocument {
             let location = &locations[0];
             let node = self.get_node_at_mut(location)?;
 
-            if let DocumentNode::VariableDef { value: old_value, raw, .. } = node {
+            if let DocumentNode::VariableDef {
+                value: old_value,
+                raw,
+                ..
+            } = node
+            {
                 *old_value = value.to_string();
                 *raw = format!("${} = {}", name, value);
             }
@@ -399,7 +425,13 @@ impl ConfigDocument {
             let location = &locations[0];
             let node = self.get_node_at_mut(location)?;
 
-            if let DocumentNode::Assignment { value: old_value, raw, key, .. } = node {
+            if let DocumentNode::Assignment {
+                value: old_value,
+                raw,
+                key,
+                ..
+            } = node
+            {
                 *old_value = value.to_string();
                 *raw = format!("{} = {}", key.join(":"), value);
             }
@@ -468,7 +500,7 @@ impl ConfigDocument {
             if i == location.path.len() - 1 {
                 // Last index - remove the node
                 if idx >= current_nodes.len() {
-                    return Err(ConfigError::custom(&format!(
+                    return Err(ConfigError::custom(format!(
                         "Invalid node path: index {} out of bounds",
                         idx
                     )));
@@ -479,7 +511,7 @@ impl ConfigDocument {
 
             // Navigate deeper
             if idx >= current_nodes.len() {
-                return Err(ConfigError::custom(&format!(
+                return Err(ConfigError::custom(format!(
                     "Invalid node path: index {} out of bounds at level {}",
                     idx, i
                 )));
@@ -487,10 +519,14 @@ impl ConfigDocument {
 
             let node = &mut current_nodes[idx];
             current_nodes = match node {
-                DocumentNode::CategoryBlock { nodes: child_nodes, .. } => child_nodes,
-                DocumentNode::SpecialCategoryBlock { nodes: child_nodes, .. } => child_nodes,
+                DocumentNode::CategoryBlock {
+                    nodes: child_nodes, ..
+                } => child_nodes,
+                DocumentNode::SpecialCategoryBlock {
+                    nodes: child_nodes, ..
+                } => child_nodes,
                 _ => {
-                    return Err(ConfigError::custom(&format!(
+                    return Err(ConfigError::custom(format!(
                         "Node at path index {} is not a category block",
                         i
                     )));
@@ -499,6 +535,157 @@ impl ConfigDocument {
         }
 
         Err(ConfigError::custom("Failed to remove node"))
+    }
+
+    /// Remove a handler call by keyword and index
+    ///
+    /// Finds all handler calls (stored as assignments) with the given keyword and removes the one
+    /// at the specified index. Note: Handler calls are parsed as Assignments, so we look for
+    /// Assignment nodes where the key matches the handler keyword.
+    /// Returns an error if the handler or index doesn't exist.
+    pub fn remove_handler_call(&mut self, keyword: &str, index: usize) -> ParseResult<()> {
+        // Handler calls are parsed as assignments with a single-element key matching the keyword
+        // Find all matching nodes by searching through the document
+        let mut matching_locations = Vec::new();
+
+        fn find_handler_calls(
+            nodes: &[DocumentNode],
+            keyword: &str,
+            current_path: &[usize],
+            results: &mut Vec<Vec<usize>>,
+        ) {
+            for (idx, node) in nodes.iter().enumerate() {
+                let mut path = current_path.to_vec();
+                path.push(idx);
+
+                match node {
+                    DocumentNode::Assignment { key, .. } => {
+                        // Handler calls have a single key element matching the keyword
+                        if key.len() == 1 && key[0] == keyword {
+                            results.push(path);
+                        }
+                    }
+                    DocumentNode::HandlerCall { keyword: kw, .. } => {
+                        // Also check for explicit HandlerCall nodes (if any exist)
+                        if kw == keyword {
+                            results.push(path);
+                        }
+                    }
+                    DocumentNode::CategoryBlock {
+                        nodes: child_nodes, ..
+                    } => {
+                        find_handler_calls(child_nodes, keyword, &path, results);
+                    }
+                    DocumentNode::SpecialCategoryBlock {
+                        nodes: child_nodes, ..
+                    } => {
+                        find_handler_calls(child_nodes, keyword, &path, results);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        find_handler_calls(&self.nodes, keyword, &[], &mut matching_locations);
+
+        if matching_locations.is_empty() {
+            return Err(ConfigError::handler(keyword, "no calls found in document"));
+        }
+
+        if index >= matching_locations.len() {
+            return Err(ConfigError::custom(format!(
+                "Handler call index {} out of bounds (found {} calls for '{}')",
+                index,
+                matching_locations.len(),
+                keyword
+            )));
+        }
+
+        let location = NodeLocation {
+            path: matching_locations[index].clone(),
+            node_type: NodeType::Assignment, // Handler calls are stored as assignments
+        };
+        self.remove_node_at(&location)?;
+        self.rebuild_index();
+        Ok(())
+    }
+
+    /// Remove a special category instance by category name and key
+    ///
+    /// Removes the entire special category block with the given name and key.
+    /// Returns an error if the category instance doesn't exist.
+    pub fn remove_special_category_instance(
+        &mut self,
+        category: &str,
+        key: &str,
+    ) -> ParseResult<()> {
+        // Special categories are indexed as "category[key]" in the key_index
+        let search_key = format!("{}[{}]", category, key);
+
+        // Search through nodes to find the matching special category block
+        fn find_special_category(
+            nodes: &[DocumentNode],
+            category: &str,
+            key: &str,
+            current_path: &[usize],
+        ) -> Option<Vec<usize>> {
+            for (idx, node) in nodes.iter().enumerate() {
+                let mut path = current_path.to_vec();
+                path.push(idx);
+
+                if let DocumentNode::SpecialCategoryBlock {
+                    name,
+                    key: Some(node_key),
+                    ..
+                } = node
+                    && name == category
+                    && node_key == key
+                {
+                    return Some(path);
+                }
+
+                // Check nested nodes in category blocks
+                match node {
+                    DocumentNode::CategoryBlock {
+                        nodes: child_nodes, ..
+                    } => {
+                        if let Some(result) =
+                            find_special_category(child_nodes, category, key, &path)
+                        {
+                            return Some(result);
+                        }
+                    }
+                    DocumentNode::SpecialCategoryBlock {
+                        nodes: child_nodes, ..
+                    } => {
+                        if let Some(result) =
+                            find_special_category(child_nodes, category, key, &path)
+                        {
+                            return Some(result);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        let found_path = find_special_category(&self.nodes, category, key, &[]);
+
+        if let Some(path) = found_path {
+            let location = NodeLocation {
+                path,
+                node_type: NodeType::SpecialCategoryBlock,
+            };
+            self.remove_node_at(&location)?;
+            self.rebuild_index();
+            Ok(())
+        } else {
+            Err(ConfigError::category_not_found(
+                &search_key,
+                Some(key.to_string()),
+            ))
+        }
     }
 }
 
@@ -520,14 +707,12 @@ mod tests {
 
     #[test]
     fn test_simple_assignment() {
-        let nodes = vec![
-            DocumentNode::Assignment {
-                key: vec!["border_size".to_string()],
-                value: "2".to_string(),
-                raw: "border_size = 2".to_string(),
-                line: 1,
-            },
-        ];
+        let nodes = vec![DocumentNode::Assignment {
+            key: vec!["border_size".to_string()],
+            value: "2".to_string(),
+            raw: "border_size = 2".to_string(),
+            line: 1,
+        }];
 
         let doc = ConfigDocument::with_nodes(nodes);
         assert_eq!(doc.serialize(), "border_size = 2\n");
@@ -535,14 +720,12 @@ mod tests {
 
     #[test]
     fn test_variable_def() {
-        let nodes = vec![
-            DocumentNode::VariableDef {
-                name: "GAPS".to_string(),
-                value: "10".to_string(),
-                raw: "$GAPS = 10".to_string(),
-                line: 1,
-            },
-        ];
+        let nodes = vec![DocumentNode::VariableDef {
+            name: "GAPS".to_string(),
+            value: "10".to_string(),
+            raw: "$GAPS = 10".to_string(),
+            line: 1,
+        }];
 
         let doc = ConfigDocument::with_nodes(nodes);
         assert_eq!(doc.serialize(), "$GAPS = 10\n");
@@ -591,22 +774,18 @@ mod tests {
 
     #[test]
     fn test_category_block() {
-        let nodes = vec![
-            DocumentNode::CategoryBlock {
-                name: "general".to_string(),
-                nodes: vec![
-                    DocumentNode::Assignment {
-                        key: vec!["border_size".to_string()],
-                        value: "2".to_string(),
-                        raw: "border_size = 2".to_string(),
-                        line: 2,
-                    },
-                ],
-                open_line: 1,
-                close_line: 3,
-                raw_open: "general {".to_string(),
-            },
-        ];
+        let nodes = vec![DocumentNode::CategoryBlock {
+            name: "general".to_string(),
+            nodes: vec![DocumentNode::Assignment {
+                key: vec!["border_size".to_string()],
+                value: "2".to_string(),
+                raw: "border_size = 2".to_string(),
+                line: 2,
+            }],
+            open_line: 1,
+            close_line: 3,
+            raw_open: "general {".to_string(),
+        }];
 
         let doc = ConfigDocument::with_nodes(nodes);
         assert_eq!(doc.serialize(), "general {\n  border_size = 2\n}\n");
@@ -614,33 +793,30 @@ mod tests {
 
     #[test]
     fn test_nested_categories() {
-        let nodes = vec![
-            DocumentNode::CategoryBlock {
-                name: "decoration".to_string(),
-                nodes: vec![
-                    DocumentNode::CategoryBlock {
-                        name: "shadow".to_string(),
-                        nodes: vec![
-                            DocumentNode::Assignment {
-                                key: vec!["enabled".to_string()],
-                                value: "true".to_string(),
-                                raw: "enabled = true".to_string(),
-                                line: 3,
-                            },
-                        ],
-                        open_line: 2,
-                        close_line: 4,
-                        raw_open: "shadow {".to_string(),
-                    },
-                ],
-                open_line: 1,
-                close_line: 5,
-                raw_open: "decoration {".to_string(),
-            },
-        ];
+        let nodes = vec![DocumentNode::CategoryBlock {
+            name: "decoration".to_string(),
+            nodes: vec![DocumentNode::CategoryBlock {
+                name: "shadow".to_string(),
+                nodes: vec![DocumentNode::Assignment {
+                    key: vec!["enabled".to_string()],
+                    value: "true".to_string(),
+                    raw: "enabled = true".to_string(),
+                    line: 3,
+                }],
+                open_line: 2,
+                close_line: 4,
+                raw_open: "shadow {".to_string(),
+            }],
+            open_line: 1,
+            close_line: 5,
+            raw_open: "decoration {".to_string(),
+        }];
 
         let doc = ConfigDocument::with_nodes(nodes);
-        assert_eq!(doc.serialize(), "decoration {\n  shadow {\n    enabled = true\n  }\n}\n");
+        assert_eq!(
+            doc.serialize(),
+            "decoration {\n  shadow {\n    enabled = true\n  }\n}\n"
+        );
     }
 
     #[test]

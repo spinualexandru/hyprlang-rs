@@ -3,7 +3,9 @@ use hyprlang::Config;
 #[test]
 fn test_basic_if_exists() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $MY_VAR = value
 
         # hyprlang if MY_VAR
@@ -13,7 +15,9 @@ fn test_basic_if_exists() {
         # hyprlang if MISSING_VAR
         excluded = excluded_value
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // Variable exists, so included should be set
     assert_eq!(config.get_string("included").unwrap(), "included_value");
@@ -25,7 +29,9 @@ fn test_basic_if_exists() {
 #[test]
 fn test_negated_if_missing() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $EXISTING_VAR = value
 
         # hyprlang if !MISSING_VAR
@@ -35,7 +41,9 @@ fn test_negated_if_missing() {
         # hyprlang if !EXISTING_VAR
         excluded = excluded_value
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // Variable doesn't exist, so condition is true
     assert_eq!(config.get_string("included").unwrap(), "included_value");
@@ -47,7 +55,9 @@ fn test_negated_if_missing() {
 #[test]
 fn test_nested_if_statements() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $VAR1 = value1
         $VAR2 = value2
 
@@ -62,7 +72,9 @@ fn test_nested_if_statements() {
                 one_exists = test_no
             # hyprlang endif
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // Both VAR1 and VAR2 exist
     assert_eq!(config.get_string("both_exist").unwrap(), "test_yes");
@@ -74,7 +86,9 @@ fn test_nested_if_statements() {
 #[test]
 fn test_nested_with_negation() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $VAR1 = value
 
         # hyprlang if VAR1
@@ -88,7 +102,9 @@ fn test_nested_with_negation() {
                 both_missing = test_yes
             # hyprlang endif
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // VAR1 exists and MISSING doesn't exist
     assert_eq!(config.get_string("nested_neg").unwrap(), "test_yes");
@@ -100,7 +116,9 @@ fn test_nested_with_negation() {
 #[test]
 fn test_three_level_nesting() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $A = 1
         $B = 2
         $C = 3
@@ -112,7 +130,9 @@ fn test_three_level_nesting() {
                 # hyprlang endif
             # hyprlang endif
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // All three variables exist
     assert_eq!(config.get_string("all_three").unwrap(), "test_yes");
@@ -121,7 +141,9 @@ fn test_three_level_nesting() {
 #[test]
 fn test_mixed_nesting() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $EXISTS = value
 
         # hyprlang if EXISTS
@@ -135,7 +157,9 @@ fn test_mixed_nesting() {
                 mixed2 = test_yes
             # hyprlang endif
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // EXISTS exists and MISSING doesn't
     assert_eq!(config.get_string("mixed").unwrap(), "test_yes");
@@ -149,11 +173,15 @@ fn test_noerror_directive() {
     let mut config = Config::new();
 
     // Should not fail even with syntax that would normally error
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         # hyprlang noerror true
         valid = value
         # hyprlang noerror false
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     assert_eq!(config.get_string("valid").unwrap(), "value");
 }
@@ -161,7 +189,9 @@ fn test_noerror_directive() {
 #[test]
 fn test_if_with_categories() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $ENABLE_FEATURE = test_yes
 
         # hyprlang if ENABLE_FEATURE
@@ -176,7 +206,9 @@ fn test_if_with_categories() {
             setting = test_no
         }
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // Feature category should be parsed
     assert_eq!(config.get_string("feature:setting1").unwrap(), "value1");
@@ -195,7 +227,9 @@ fn test_negation_with_env_var() {
         std::env::set_var("TEST_ENV_VAR", "test_value");
     }
 
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $ENV_VAR = $TEST_ENV_VAR
 
         # hyprlang if ENV_VAR
@@ -205,7 +239,9 @@ fn test_negation_with_env_var() {
         # hyprlang if !MISSING_ENV
         no_env = test_yes
         # hyprlang endif
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     assert_eq!(config.get_string("env_exists").unwrap(), "test_yes");
     assert_eq!(config.get_string("no_env").unwrap(), "test_yes");
@@ -221,10 +257,12 @@ fn test_endif_without_if() {
     let mut config = Config::new();
 
     // Should error on endif without matching if
-    let result = config.parse(r#"
+    let result = config.parse(
+        r#"
         value = test
         # hyprlang endif
-    "#);
+    "#,
+    );
 
     assert!(result.is_err());
 }
@@ -234,11 +272,15 @@ fn test_unclosed_if() {
     let mut config = Config::new();
 
     // Should succeed during parse but has_unclosed_blocks should be true
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $VAR = value
         # hyprlang if VAR
         value = test
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // Note: The Config doesn't expose has_unclosed_blocks,
     // but in a real scenario this would be caught

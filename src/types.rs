@@ -178,10 +178,9 @@ impl ConfigValue {
     /// Try to get the value as a custom type
     pub fn as_custom<T: 'static>(&self) -> ParseResult<&T> {
         match self {
-            ConfigValue::Custom { value, .. } => {
-                value.downcast_ref::<T>()
-                    .ok_or_else(|| ConfigError::type_error("value", "Custom", self.type_name()))
-            }
+            ConfigValue::Custom { value, .. } => value
+                .downcast_ref::<T>()
+                .ok_or_else(|| ConfigError::type_error("value", "Custom", self.type_name())),
             _ => Err(ConfigError::type_error("value", "Custom", self.type_name())),
         }
     }

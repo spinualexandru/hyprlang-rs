@@ -39,19 +39,28 @@ fn test_escaped_backslash_with_expr() {
 #[test]
 fn test_mixed_escaped_and_eval() {
     let mut config = Config::new();
-    config.parse(r#"testValue = "{{8 - 10}} and \{{literal}}""#).unwrap();
+    config
+        .parse(r#"testValue = "{{8 - 10}} and \{{literal}}""#)
+        .unwrap();
 
     // First expression evaluates, second is literal
-    assert_eq!(config.get_string("testValue").unwrap(), "-2 and {{literal}}");
+    assert_eq!(
+        config.get_string("testValue").unwrap(),
+        "-2 and {{literal}}"
+    );
 }
 
 #[test]
 fn test_escaped_expr_in_variable() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $ESCAPED = \{{10 + 10}}
         testValue = $ESCAPED
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // Variable should contain literal {{}}
     assert_eq!(config.get_string("testValue").unwrap(), "{{10 + 10}}");
@@ -60,23 +69,35 @@ fn test_escaped_expr_in_variable() {
 #[test]
 fn test_complex_mixed_escapes() {
     let mut config = Config::new();
-    config.parse(r#"testValue = "{{8 - 10}} \{{ literal }} more""#).unwrap();
+    config
+        .parse(r#"testValue = "{{8 - 10}} \{{ literal }} more""#)
+        .unwrap();
 
     // First expression evaluates, escaped part stays literal
-    assert_eq!(config.get_string("testValue").unwrap(), "-2 {{ literal }} more");
+    assert_eq!(
+        config.get_string("testValue").unwrap(),
+        "-2 {{ literal }} more"
+    );
 }
 
 #[test]
 fn test_escaped_with_variables() {
     let mut config = Config::new();
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         $MOVING_VAR = 500
         $DYNAMIC = moved: {{$MOVING_VAR / 2}} expr: \{{$MOVING_VAR / 2}}
         testValue = \{{ $DYNAMIC }}
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
     // The testValue should have escaped outer braces, but DYNAMIC should be expanded
-    assert_eq!(config.get_string("testValue").unwrap(), "{{ moved: 250 expr: {{500 / 2}} }}");
+    assert_eq!(
+        config.get_string("testValue").unwrap(),
+        "{{ moved: 250 expr: {{500 / 2}} }}"
+    );
 }
 
 #[test]
@@ -94,7 +115,10 @@ fn test_escaped_not_expression() {
     config.parse(r"testValue = \{notAnExpression").unwrap();
 
     // Single brace escape should not be processed
-    assert_eq!(config.get_string("testValue").unwrap(), r"\{notAnExpression");
+    assert_eq!(
+        config.get_string("testValue").unwrap(),
+        r"\{notAnExpression"
+    );
 }
 
 #[test]
@@ -102,18 +126,31 @@ fn test_config_file_escapes() {
     // Test the actual patterns from the test config file
     let mut config = Config::new();
 
-    config.parse(r#"
+    config
+        .parse(
+            r#"
         testInt = 123
         testEscapedExpr = "\{{testInt + 7}}"
         testEscapedExpr2 = "{\{testInt + 7}}"
         testEscapedExpr3 = "\{\{3 + 8}}"
         testEscapedEscape = "\\{{10 - 5}}"
         testSimpleMix = "{{8 - 10}} and \{{ literal }}"
-    "#).unwrap();
+    "#,
+        )
+        .unwrap();
 
-    assert_eq!(config.get_string("testEscapedExpr").unwrap(), "{{testInt + 7}}");
-    assert_eq!(config.get_string("testEscapedExpr2").unwrap(), "{{testInt + 7}}");
+    assert_eq!(
+        config.get_string("testEscapedExpr").unwrap(),
+        "{{testInt + 7}}"
+    );
+    assert_eq!(
+        config.get_string("testEscapedExpr2").unwrap(),
+        "{{testInt + 7}}"
+    );
     assert_eq!(config.get_string("testEscapedExpr3").unwrap(), "{{3 + 8}}");
     assert_eq!(config.get_string("testEscapedEscape").unwrap(), r"\5");
-    assert_eq!(config.get_string("testSimpleMix").unwrap(), "-2 and {{ literal }}");
+    assert_eq!(
+        config.get_string("testSimpleMix").unwrap(),
+        "-2 and {{ literal }}"
+    );
 }
