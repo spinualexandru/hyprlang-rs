@@ -27,7 +27,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! hyprlang = { version = "0.2.1", features = ["mutation"] }
+//! hyprlang = { version = "0.3.0", features = ["mutation"] }
 //! ```
 //!
 //! This provides:

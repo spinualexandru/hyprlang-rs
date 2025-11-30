@@ -29,8 +29,9 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 - 💬 **Conditional Directives** - `# hyprlang if/endif/noerror` support with negation
 - 🎨 **Expression Escaping** - Escape expressions with `\{{}}` or `{\{}}` for literal braces
 - 🔄 **Mutation & Serialization** - Modify config values and save back to files (optional)
+- 📁 **Multi-File Mutation Tracking** - Track and save changes to the correct source file when using `source` directives
 - 🎯 **Windowrule v3 / Layerrule v2** - Full support for new special category syntax with 85+ registered properties
-- ✅ **Fully Tested** - 171 tests covering all features
+- ✅ **Fully Tested** - 177 tests covering all features
 
 ## Installation
 
@@ -69,6 +70,8 @@ hyprlang = { version = "0.2.1", features = ["mutation"] }
 This feature provides:
 - **Mutation API** - Modify config values, variables, handlers, and special categories
 - **Serialization** - Save configurations back to files with clean formatting
+- **Multi-file tracking** - Automatically track which values came from which source file
+- **Smart saving** - Save changes only to the modified files when using `source` directives
 - **Two mutation styles** - Direct setters and mutable references
 - **Round-trip support** - Parse → modify → save → parse
 
@@ -720,6 +723,74 @@ Run the comprehensive example:
 cargo run --example mutation_example --features mutation
 ```
 
+### Multi-File Mutation (Optional Feature)
+
+When your configuration uses `source` directives to include other files, the mutation feature automatically tracks which values came from which file and saves changes only to the modified files:
+
+```rust
+use hyprlang::Config;
+use std::path::Path;
+
+// Create config files
+// main.conf:
+//   source = ./vars.conf
+//   source = ./appearance.conf
+//   border_size = 2
+//
+// vars.conf:
+//   $GAPS = 10
+//
+// appearance.conf:
+//   decoration {
+//     rounding = 5
+//   }
+
+let mut config = Config::new();
+config.parse_file(Path::new("main.conf"))?;
+
+// ===== Check which file defines a key =====
+let source = config.get_key_source_file("decoration:rounding");
+println!("rounding is defined in: {:?}", source);
+
+// ===== Mutate a value from appearance.conf =====
+config.set_int("decoration:rounding", 15);
+
+// ===== Check which files were modified =====
+let modified = config.get_modified_files();
+println!("Modified files: {:?}", modified);  // Only appearance.conf
+
+// ===== Save only the modified files =====
+let saved = config.save_all()?;
+println!("Saved files: {:?}", saved);  // Only appearance.conf was written
+
+// ===== The master config preserves source directives =====
+// main.conf still contains:
+//   source = ./vars.conf
+//   source = ./appearance.conf
+//   border_size = 2
+//
+// appearance.conf now contains:
+//   decoration {
+//     rounding = 15  # <-- Updated!
+//   }
+//
+// vars.conf remains unchanged
+
+// ===== List all source files =====
+let all_files = config.get_source_files();
+println!("All source files: {:?}", all_files);
+
+// ===== Serialize a specific file =====
+let appearance_content = config.serialize_file(Path::new("./appearance.conf"))?;
+println!("appearance.conf:\n{}", appearance_content);
+```
+
+**Key features:**
+- 🎯 **Automatic tracking** - No need to manually specify which file to update
+- 💾 **Selective saving** - Only modified files are written to disk
+- 🔒 **Structure preservation** - Source directives remain intact in the master config
+- 🔍 **File inspection** - Query which file defines any key
+
 ### Parse from File
 
 ```rust
@@ -853,6 +924,13 @@ config.serialize() -> String
 config.save() -> Result<()>
 config.save_as(path: impl AsRef<Path>) -> Result<()>
 
+// Multi-file mutation (requires `mutation` feature)
+config.save_all() -> Result<Vec<PathBuf>>
+config.serialize_file(path: &Path) -> Result<String>
+config.get_key_source_file(key: &str) -> Option<&Path>
+config.get_source_files() -> Vec<&Path>
+config.get_modified_files() -> Vec<&Path>
+
 // Querying
 config.keys() -> Vec<&str>
 config.variables() -> &HashMap<String, String>
@@ -938,13 +1016,14 @@ cargo test
 cargo test --all-features
 ```
 
-The project includes **171 tests** with 100% pass rate:
+The project includes **177 tests** with 100% pass rate:
 - 52 unit tests covering core functionality
 - 11 conditional directive tests
 - 11 expression escaping tests
 - 15 windowrule v3 / layerrule v2 tests
 - 12 Hyprland config tests
 - 10 mutation & round-trip serialization tests
+- 6 multi-file mutation tests
 - 19 parsing edge case tests
 - 41 documentation tests
 
