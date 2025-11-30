@@ -10,7 +10,8 @@
 //! - [`NodeLocation`] - Index system for fast node lookups during mutations
 
 use crate::error::{ConfigError, ParseResult};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 /// Represents a parsed configuration with full source fidelity.
 #[derive(Debug, Clone)]
@@ -23,7 +24,7 @@ pub struct ConfigDocument {
     key_index: HashMap<String, Vec<NodeLocation>>,
 
     /// Source file path (if parsed from a file)
-    pub source_path: Option<String>,
+    pub source_path: Option<PathBuf>,
 }
 
 /// A node in the configuration document
@@ -95,6 +96,8 @@ pub enum DocumentNode {
         path: String,
         raw: String,
         line: usize,
+        /// Resolved absolute path (populated during parsing)
+        resolved_path: Option<PathBuf>,
     },
 
     /// Comment directive: # hyprlang if/endif/noerror
@@ -692,6 +695,96 @@ impl ConfigDocument {
 impl Default for ConfigDocument {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Tracks documents across multiple source files.
+///
+/// When a config file includes other files via `source = path` directives,
+/// this struct maintains separate documents for each file, enabling
+/// per-file mutations and serialization.
+#[derive(Debug, Clone)]
+pub struct MultiFileDocument {
+    /// Primary config file path
+    pub primary_path: PathBuf,
+
+    /// All documents by their resolved absolute path
+    pub documents: HashMap<PathBuf, ConfigDocument>,
+
+    /// Tracks which files have been modified since parsing
+    dirty_files: HashSet<PathBuf>,
+
+    /// Maps logical keys to their source file
+    /// e.g., "general:border_size" -> PathBuf of the file defining it
+    key_to_file: HashMap<String, PathBuf>,
+}
+
+impl MultiFileDocument {
+    /// Create a new multi-file document with a primary path
+    pub fn new(primary_path: PathBuf) -> Self {
+        Self {
+            primary_path,
+            documents: HashMap::new(),
+            dirty_files: HashSet::new(),
+            key_to_file: HashMap::new(),
+        }
+    }
+
+    /// Add a document for a source file
+    pub fn add_document(&mut self, path: PathBuf, document: ConfigDocument) {
+        self.documents.insert(path, document);
+    }
+
+    /// Get a document by path
+    pub fn get_document(&self, path: &Path) -> Option<&ConfigDocument> {
+        self.documents.get(path)
+    }
+
+    /// Get a mutable document by path
+    pub fn get_document_mut(&mut self, path: &Path) -> Option<&mut ConfigDocument> {
+        self.documents.get_mut(path)
+    }
+
+    /// Register a key's source file
+    pub fn register_key(&mut self, key: String, source_path: PathBuf) {
+        self.key_to_file.insert(key, source_path);
+    }
+
+    /// Get the source file for a key
+    pub fn get_key_source(&self, key: &str) -> Option<&PathBuf> {
+        self.key_to_file.get(key)
+    }
+
+    /// Mark a file as dirty (modified)
+    pub fn mark_dirty(&mut self, path: &Path) {
+        self.dirty_files.insert(path.to_path_buf());
+    }
+
+    /// Check if a file is dirty
+    #[allow(dead_code)]
+    pub fn is_dirty(&self, path: &Path) -> bool {
+        self.dirty_files.contains(path)
+    }
+
+    /// Get all dirty files
+    pub fn get_dirty_files(&self) -> Vec<&PathBuf> {
+        self.dirty_files.iter().collect()
+    }
+
+    /// Get all source file paths
+    pub fn get_all_paths(&self) -> Vec<&PathBuf> {
+        self.documents.keys().collect()
+    }
+
+    /// Clear dirty flags (after saving)
+    pub fn clear_dirty(&mut self) {
+        self.dirty_files.clear();
+    }
+
+    /// Clear dirty flag for a specific file
+    #[allow(dead_code)]
+    pub fn clear_dirty_file(&mut self, path: &Path) {
+        self.dirty_files.remove(path);
     }
 }
 

@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlang"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "pest",
  "pest_derive",

@@ -499,7 +499,7 @@ impl HyprlangParser {
                 let path = Self::parse_value_to_string(value_pair)?;
 
                 let stmt = Statement::Source { path: path.clone() };
-                let node = DocumentNode::Source { path, raw, line };
+                let node = DocumentNode::Source { path, raw, line, resolved_path: None };
                 Ok(Some((stmt, Some(node))))
             }
 
