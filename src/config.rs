@@ -56,6 +56,14 @@ pub struct Config {
     /// Source file path (for save operations)
     #[cfg(feature = "mutation")]
     source_file: Option<PathBuf>,
+
+    /// Multi-file document for tracking source files
+    #[cfg(feature = "mutation")]
+    multi_document: Option<crate::document::MultiFileDocument>,
+
+    /// Current source file being parsed (for key tracking)
+    #[cfg(feature = "mutation")]
+    current_source_file: Option<PathBuf>,
 }
 
 /// Configuration options
@@ -101,6 +109,10 @@ impl Config {
             document: None,
             #[cfg(feature = "mutation")]
             source_file: None,
+            #[cfg(feature = "mutation")]
+            multi_document: None,
+            #[cfg(feature = "mutation")]
+            current_source_file: None,
         }
     }
 
@@ -125,6 +137,10 @@ impl Config {
             document: None,
             #[cfg(feature = "mutation")]
             source_file: None,
+            #[cfg(feature = "mutation")]
+            multi_document: None,
+            #[cfg(feature = "mutation")]
+            current_source_file: None,
         }
     }
 
@@ -139,8 +155,9 @@ impl Config {
     /// Parse a configuration file
     pub fn parse_file(&mut self, path: impl AsRef<Path>) -> ParseResult<()> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| ConfigError::io(path.display().to_string(), e.to_string()))?;
+        let canonical_path = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf());
 
         // Set base dir from file path if not already set
         if self.options.base_dir.is_none()
@@ -150,20 +167,59 @@ impl Config {
             self.source_resolver = Some(SourceResolver::new(parent));
         }
 
-        self.parse(&content)
+        // Initialize multi_document if this is the primary file
+        #[cfg(feature = "mutation")]
+        let is_primary = self.multi_document.is_none();
+
+        #[cfg(feature = "mutation")]
+        if is_primary {
+            self.multi_document = Some(crate::document::MultiFileDocument::new(
+                canonical_path.clone(),
+            ));
+            self.source_file = Some(canonical_path.clone());
+        }
+
+        // Parse the file with path tracking
+        self.parse_file_internal(&canonical_path)
     }
 
-    /// Parse a configuration string
-    pub fn parse(&mut self, input: &str) -> ParseResult<()> {
+    /// Internal method to parse a file with path tracking
+    fn parse_file_internal(&mut self, path: &Path) -> ParseResult<()> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| ConfigError::io(path.display().to_string(), e.to_string()))?;
+
+        // Set current source file for key tracking
+        #[cfg(feature = "mutation")]
+        {
+            self.current_source_file = Some(path.to_path_buf());
+        }
+
+        // Parse the content
+        self.parse_with_path(&content, Some(path))
+    }
+
+    /// Parse content with an associated file path
+    fn parse_with_path(&mut self, input: &str, source_path: Option<&Path>) -> ParseResult<()> {
         self.commence()?;
 
         #[cfg(feature = "mutation")]
-        let (parsed, document) = HyprlangParser::parse_with_document(input)?;
+        let (parsed, mut document) = HyprlangParser::parse_with_document(input)?;
         #[cfg(not(feature = "mutation"))]
         let parsed = HyprlangParser::parse_config(input)?;
 
         #[cfg(feature = "mutation")]
         {
+            // Set the source path on the document
+            if let Some(path) = source_path {
+                document.source_path = Some(path.to_path_buf());
+            }
+
+            // Store document in multi_document if available
+            if let (Some(multi_doc), Some(path)) = (&mut self.multi_document, source_path) {
+                multi_doc.add_document(path.to_path_buf(), document.clone());
+            }
+
+            // Also keep backward-compatible single document
             self.document = Some(document);
         }
 
@@ -182,6 +238,11 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Parse a configuration string
+    pub fn parse(&mut self, input: &str) -> ParseResult<()> {
+        self.parse_with_path(input, None)
     }
 
     /// Parse a single line dynamically (after initial parse)
@@ -223,6 +284,14 @@ impl Config {
                 // Don't evaluate expressions here - they'll be evaluated when the variable is used
                 let escaped = process_escapes(value);
                 let expanded = self.variables.expand(&escaped)?;
+
+                // Track variable origin in multi_document
+                #[cfg(feature = "mutation")]
+                if let (Some(multi_doc), Some(source_file)) =
+                    (&mut self.multi_document, &self.current_source_file)
+                {
+                    multi_doc.register_key(format!("${}", name), source_file.clone());
+                }
 
                 self.variables.set(name.clone(), expanded.clone());
 
@@ -270,6 +339,14 @@ impl Config {
                     let full_key = self.make_full_key(key);
                     let config_value = self.parse_config_value(value)?;
                     let raw = self.value_to_string(value);
+
+                    // Track key origin in multi_document
+                    #[cfg(feature = "mutation")]
+                    if let (Some(multi_doc), Some(source_file)) =
+                        (&mut self.multi_document, &self.current_source_file)
+                    {
+                        multi_doc.register_key(full_key.clone(), source_file.clone());
+                    }
 
                     self.values
                         .insert(full_key, ConfigValueEntry::new(config_value, raw));
@@ -384,8 +461,13 @@ impl Config {
                     return Err(ConfigError::custom("Source resolver not initialized"));
                 };
 
-                // Parse the file
-                let result = self.parse_file(&resolved);
+                // Canonicalize the resolved path
+                let canonical_resolved = resolved
+                    .canonicalize()
+                    .unwrap_or_else(|_| resolved.clone());
+
+                // Parse the sourced file using internal method (avoids re-initializing multi_document)
+                let result = self.parse_file_internal(&canonical_resolved);
 
                 // End load
                 if let Some(resolver) = &mut self.source_resolver {
@@ -695,7 +777,35 @@ impl Config {
         // Update document tree if mutation feature is enabled
         #[cfg(feature = "mutation")]
         {
-            if let Some(doc) = &mut self.document {
+            // Try to update in the correct source file using multi_document
+            let updated_in_multi = if let Some(multi_doc) = &mut self.multi_document {
+                // Find which file this key belongs to
+                let source_file = multi_doc
+                    .get_key_source(&key)
+                    .cloned()
+                    .unwrap_or_else(|| multi_doc.primary_path.clone());
+
+                // Update the document in that file
+                if let Some(doc) = multi_doc.get_document_mut(&source_file) {
+                    let _ = doc.update_or_insert_value(&key, &raw);
+                    multi_doc.mark_dirty(&source_file);
+
+                    // If this is a new key, register it with the primary file
+                    if multi_doc.get_key_source(&key).is_none() {
+                        multi_doc.register_key(key.clone(), source_file);
+                    }
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            // Fallback: update single document if multi_document didn't handle it
+            if !updated_in_multi
+                && let Some(doc) = &mut self.document
+            {
                 let _ = doc.update_or_insert_value(&key, &raw);
             }
         }
@@ -825,7 +935,37 @@ impl Config {
         // Update document tree if mutation feature is enabled
         #[cfg(feature = "mutation")]
         {
-            if let Some(doc) = &mut self.document {
+            let var_key = format!("${}", name);
+
+            // Try to update in the correct source file using multi_document
+            let updated_in_multi = if let Some(multi_doc) = &mut self.multi_document {
+                // Find which file this variable belongs to
+                let source_file = multi_doc
+                    .get_key_source(&var_key)
+                    .cloned()
+                    .unwrap_or_else(|| multi_doc.primary_path.clone());
+
+                // Update the document in that file
+                if let Some(doc) = multi_doc.get_document_mut(&source_file) {
+                    let _ = doc.update_or_insert_variable(&name, &value);
+                    multi_doc.mark_dirty(&source_file);
+
+                    // If this is a new variable, register it with the primary file
+                    if multi_doc.get_key_source(&var_key).is_none() {
+                        multi_doc.register_key(var_key, source_file);
+                    }
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            // Fallback: update single document if multi_document didn't handle it
+            if !updated_in_multi
+                && let Some(doc) = &mut self.document
+            {
                 let _ = doc.update_or_insert_variable(&name, &value);
             }
         }
@@ -1341,6 +1481,170 @@ impl Config {
         let content = self.serialize();
         std::fs::write(&path, content)
             .map_err(|e| ConfigError::io(path.as_ref().display().to_string(), e.to_string()))
+    }
+
+    /// Save all modified files.
+    ///
+    /// When configuration is loaded from multiple files via `source = path` directives,
+    /// this method saves only the files that have been modified since parsing.
+    ///
+    /// Returns a list of file paths that were written.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// // Assume main.conf includes vars.conf and appearance.conf via source directives
+    /// config.parse_file("main.conf").unwrap();
+    ///
+    /// // Modify a value from appearance.conf
+    /// config.set_int("decoration:rounding", 15);
+    ///
+    /// // Save only the modified files (appearance.conf in this case)
+    /// let saved_files = config.save_all().unwrap();
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn save_all(&mut self) -> ParseResult<Vec<PathBuf>> {
+        let mut saved = Vec::new();
+
+        if let Some(multi_doc) = &self.multi_document {
+            let dirty_files: Vec<PathBuf> = multi_doc.get_dirty_files().iter().map(|p| (*p).clone()).collect();
+
+            for path in dirty_files {
+                if let Some(doc) = multi_doc.get_document(&path) {
+                    let content = doc.serialize();
+                    std::fs::write(&path, content)
+                        .map_err(|e| ConfigError::io(path.display().to_string(), e.to_string()))?;
+                    saved.push(path);
+                }
+            }
+        }
+
+        // Clear dirty flags after successful save
+        if let Some(multi_doc) = &mut self.multi_document {
+            multi_doc.clear_dirty();
+        }
+
+        Ok(saved)
+    }
+
+    /// Serialize a specific source file.
+    ///
+    /// Returns the serialized content of the specified source file, or an error
+    /// if the file is not part of this configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    /// use std::path::Path;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse_file("main.conf").unwrap();
+    ///
+    /// // Get the serialized content of a specific source file
+    /// let content = config.serialize_file(Path::new("/path/to/vars.conf")).unwrap();
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn serialize_file(&self, path: &Path) -> ParseResult<String> {
+        if let Some(multi_doc) = &self.multi_document
+            && let Some(doc) = multi_doc.get_document(path)
+        {
+            return Ok(doc.serialize());
+        }
+
+        Err(ConfigError::custom(format!(
+            "File not found in configuration: {}",
+            path.display()
+        )))
+    }
+
+    /// Get which source file a key is defined in.
+    ///
+    /// Returns the path to the source file that contains the given key,
+    /// or `None` if the key doesn't exist or the configuration wasn't loaded from files.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse_file("main.conf").unwrap();
+    ///
+    /// if let Some(path) = config.get_key_source_file("decoration:rounding") {
+    ///     println!("Key is defined in: {}", path.display());
+    /// }
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn get_key_source_file(&self, key: &str) -> Option<&Path> {
+        self.multi_document
+            .as_ref()
+            .and_then(|multi_doc| multi_doc.get_key_source(key))
+            .map(|p| p.as_path())
+    }
+
+    /// Get all source files that are part of this configuration.
+    ///
+    /// Returns a list of all file paths that were parsed as part of this configuration,
+    /// including the primary file and any files included via `source` directives.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse_file("main.conf").unwrap();
+    ///
+    /// for path in config.get_source_files() {
+    ///     println!("Source file: {}", path.display());
+    /// }
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn get_source_files(&self) -> Vec<&Path> {
+        self.multi_document
+            .as_ref()
+            .map(|multi_doc| multi_doc.get_all_paths().iter().map(|p| p.as_path()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get all files that have been modified since parsing.
+    ///
+    /// Returns a list of file paths that have pending changes to be saved.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # #[cfg(feature = "mutation")] {
+    /// use hyprlang::Config;
+    ///
+    /// let mut config = Config::new();
+    /// config.parse_file("main.conf").unwrap();
+    ///
+    /// config.set_int("decoration:rounding", 15);
+    ///
+    /// for path in config.get_modified_files() {
+    ///     println!("Modified file: {}", path.display());
+    /// }
+    /// # }
+    /// ```
+    #[cfg(feature = "mutation")]
+    pub fn get_modified_files(&self) -> Vec<&Path> {
+        self.multi_document
+            .as_ref()
+            .map(|multi_doc| multi_doc.get_dirty_files().iter().map(|p| p.as_path()).collect())
+            .unwrap_or_default()
     }
 
     /// Generate a synthetic config (when no document exists)
