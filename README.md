@@ -33,6 +33,14 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 - 🎯 **Windowrule v3 / Layerrule v2** - Full support for new special category syntax with 85+ registered properties
 - ✅ **Fully Tested** - 177 tests covering all features
 
+## Benchmarks
+
+See [BENCHMARKS.md](BENCHMARKS.md) for detailed performance metrics. Quick summary:
+
+- **Parsing:** ~2.7 µs/line (370k lines/sec)
+- **Retrieval:** 10-13 ns per operation
+- **Serialization:** ~65 ns/line
+
 ## Installation
 
 Add this to your `Cargo.toml`:

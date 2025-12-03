@@ -23,3 +23,19 @@ pest_derive = "2.8.4"
 [lib]
 name = "hyprlang"
 path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "parsing"
+harness = false
+
+[[bench]]
+name = "retrieval"
+harness = false
+
+[[bench]]
+name = "mutation"
+harness = false
+required-features = ["mutation"]
