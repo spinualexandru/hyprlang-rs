@@ -27,6 +27,9 @@ pub struct SpecialCategoryDescriptor {
 
     /// Default values for properties in this category
     pub default_values: HashMap<String, ConfigValue>,
+
+    /// If true, accessing a non-existent instance returns None instead of an error
+    pub ignore_missing: bool,
 }
 
 impl SpecialCategoryDescriptor {
@@ -37,6 +40,7 @@ impl SpecialCategoryDescriptor {
             category_type: SpecialCategoryType::Keyed,
             key_field: Some(key_field.into()),
             default_values: HashMap::new(),
+            ignore_missing: false,
         }
     }
 
@@ -47,6 +51,7 @@ impl SpecialCategoryDescriptor {
             category_type: SpecialCategoryType::Static,
             key_field: None,
             default_values: HashMap::new(),
+            ignore_missing: false,
         }
     }
 
@@ -57,12 +62,19 @@ impl SpecialCategoryDescriptor {
             category_type: SpecialCategoryType::Anonymous,
             key_field: None,
             default_values: HashMap::new(),
+            ignore_missing: false,
         }
     }
 
     /// Add a default value for a property
     pub fn with_default(mut self, property: impl Into<String>, value: ConfigValue) -> Self {
         self.default_values.insert(property.into(), value);
+        self
+    }
+
+    /// Set ignore_missing to true - accessing non-existent instances returns None instead of error
+    pub fn with_ignore_missing(mut self) -> Self {
+        self.ignore_missing = true;
         self
     }
 }
@@ -227,6 +239,56 @@ impl SpecialCategoryManager {
             .ok_or_else(|| ConfigError::category_not_found(category_name, Some(key.to_string())))
     }
 
+    /// Try to get a special category instance, returning None if not found
+    ///
+    /// This is useful when the category has `ignore_missing` set to true,
+    /// or when you want to check if an instance exists without erroring.
+    pub fn try_get_instance(
+        &self,
+        category_name: &str,
+        key: &str,
+    ) -> Option<&SpecialCategoryInstance> {
+        self.instances
+            .get(category_name)
+            .and_then(|instances| instances.get(key))
+    }
+
+    /// Try to get a mutable special category instance, returning None if not found
+    pub fn try_get_instance_mut(
+        &mut self,
+        category_name: &str,
+        key: &str,
+    ) -> Option<&mut SpecialCategoryInstance> {
+        self.instances
+            .get_mut(category_name)
+            .and_then(|instances| instances.get_mut(key))
+    }
+
+    /// Get a special category instance, respecting the `ignore_missing` flag
+    ///
+    /// If the category has `ignore_missing` set to true and the instance doesn't exist,
+    /// returns `Ok(None)` instead of an error.
+    pub fn get_instance_optional(
+        &self,
+        category_name: &str,
+        key: &str,
+    ) -> ParseResult<Option<&SpecialCategoryInstance>> {
+        let ignore_missing = self
+            .descriptors
+            .get(category_name)
+            .map(|d| d.ignore_missing)
+            .unwrap_or(false);
+
+        match self.try_get_instance(category_name, key) {
+            Some(instance) => Ok(Some(instance)),
+            None if ignore_missing => Ok(None),
+            None => Err(ConfigError::category_not_found(
+                category_name,
+                Some(key.to_string()),
+            )),
+        }
+    }
+
     /// Get all keys for a special category
     pub fn list_keys(&self, category_name: &str) -> Vec<String> {
         self.instances
@@ -324,5 +386,68 @@ mod tests {
         assert_eq!(key1, "anonymous_0");
         assert_eq!(key2, "anonymous_1");
         assert_eq!(key3, "anonymous_2");
+    }
+
+    #[test]
+    fn test_ignore_missing_flag() {
+        let descriptor = SpecialCategoryDescriptor::keyed("device", "name").with_ignore_missing();
+        assert!(descriptor.ignore_missing);
+
+        let descriptor_default = SpecialCategoryDescriptor::keyed("device2", "name");
+        assert!(!descriptor_default.ignore_missing);
+    }
+
+    #[test]
+    fn test_try_get_instance_returns_none() {
+        let mut manager = SpecialCategoryManager::new();
+        manager.register(SpecialCategoryDescriptor::keyed("device", "name"));
+
+        // Non-existent instance returns None
+        assert!(manager.try_get_instance("device", "nonexistent").is_none());
+
+        // Create instance and verify it returns Some
+        manager
+            .create_instance("device", Some("mouse".to_string()))
+            .unwrap();
+        assert!(manager.try_get_instance("device", "mouse").is_some());
+    }
+
+    #[test]
+    fn test_get_instance_optional_without_ignore_missing() {
+        let mut manager = SpecialCategoryManager::new();
+        // Register without ignore_missing (default is false)
+        manager.register(SpecialCategoryDescriptor::keyed("device", "name"));
+
+        // Non-existent instance returns error
+        let result = manager.get_instance_optional("device", "nonexistent");
+        assert!(result.is_err());
+
+        // Create instance and verify it returns Ok(Some)
+        manager
+            .create_instance("device", Some("mouse".to_string()))
+            .unwrap();
+        let result = manager.get_instance_optional("device", "mouse");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn test_get_instance_optional_with_ignore_missing() {
+        let mut manager = SpecialCategoryManager::new();
+        // Register with ignore_missing = true
+        manager.register(SpecialCategoryDescriptor::keyed("device", "name").with_ignore_missing());
+
+        // Non-existent instance returns Ok(None) instead of error
+        let result = manager.get_instance_optional("device", "nonexistent");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+
+        // Create instance and verify it returns Ok(Some)
+        manager
+            .create_instance("device", Some("mouse".to_string()))
+            .unwrap();
+        let result = manager.get_instance_optional("device", "mouse");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
     }
 }
