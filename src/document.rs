@@ -717,6 +717,10 @@ pub struct MultiFileDocument {
     /// Maps logical keys to their source file
     /// e.g., "general:border_size" -> PathBuf of the file defining it
     key_to_file: HashMap<String, PathBuf>,
+
+    /// Maps handler names to their source file
+    /// e.g., "bind" -> PathBuf of the file containing bind calls
+    handler_to_file: HashMap<String, PathBuf>,
 }
 
 impl MultiFileDocument {
@@ -727,6 +731,7 @@ impl MultiFileDocument {
             documents: HashMap::new(),
             dirty_files: HashSet::new(),
             key_to_file: HashMap::new(),
+            handler_to_file: HashMap::new(),
         }
     }
 
@@ -753,6 +758,17 @@ impl MultiFileDocument {
     /// Get the source file for a key
     pub fn get_key_source(&self, key: &str) -> Option<&PathBuf> {
         self.key_to_file.get(key)
+    }
+
+    /// Register a handler's source file
+    pub fn register_handler(&mut self, handler: String, source_path: PathBuf) {
+        // Only register the first occurrence (don't overwrite if already registered)
+        self.handler_to_file.entry(handler).or_insert(source_path);
+    }
+
+    /// Get the source file for a handler
+    pub fn get_handler_source(&self, handler: &str) -> Option<&PathBuf> {
+        self.handler_to_file.get(handler)
     }
 
     /// Mark a file as dirty (modified)
