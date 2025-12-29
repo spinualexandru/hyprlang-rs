@@ -11,8 +11,8 @@ statement = _{
     comment |
     directive |
     variable_def |
-    category_block |
     special_category_block |
+    category_block |
     assignment
 }
 
