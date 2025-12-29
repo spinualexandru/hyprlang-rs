@@ -328,9 +328,17 @@ impl Config {
                     };
 
                     self.handler_calls
-                        .entry(full_key)
+                        .entry(full_key.clone())
                         .or_default()
                         .push(expanded_value.clone());
+
+                    // Track handler origin in multi_document
+                    #[cfg(feature = "mutation")]
+                    if let (Some(multi_doc), Some(source_file)) =
+                        (&mut self.multi_document, &self.current_source_file)
+                    {
+                        multi_doc.register_handler(full_key, source_file.clone());
+                    }
 
                     self.handlers
                         .execute(&self.current_path, keyword, &expanded_value, None)?;
@@ -457,9 +465,17 @@ impl Config {
                     };
 
                     self.handler_calls
-                        .entry(full_key)
+                        .entry(full_key.clone())
                         .or_default()
                         .push(expanded_value.clone());
+
+                    // Track handler origin in multi_document
+                    #[cfg(feature = "mutation")]
+                    if let (Some(multi_doc), Some(source_file)) =
+                        (&mut self.multi_document, &self.current_source_file)
+                    {
+                        multi_doc.register_handler(full_key, source_file.clone());
+                    }
                 }
 
                 // Execute the handler if one is registered
@@ -1231,8 +1247,30 @@ impl Config {
 
         #[cfg(feature = "mutation")]
         {
-            if let Some(doc) = &mut self.document {
-                let _ = doc.add_handler_call(&handler, &value);
+            // Try to update in the correct source file using multi_document
+            let updated_in_multi = if let Some(multi_doc) = &mut self.multi_document {
+                // Find which file has this handler, or use primary file
+                let source_file = multi_doc
+                    .get_handler_source(&handler)
+                    .cloned()
+                    .unwrap_or_else(|| multi_doc.primary_path.clone());
+
+                if let Some(doc) = multi_doc.get_document_mut(&source_file) {
+                    let _ = doc.add_handler_call(&handler, &value);
+                    multi_doc.mark_dirty(&source_file);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            // Fallback: update single document if multi_document didn't handle it
+            if !updated_in_multi {
+                if let Some(doc) = &mut self.document {
+                    let _ = doc.add_handler_call(&handler, &value);
+                }
             }
         }
 
@@ -1304,9 +1342,28 @@ impl Config {
         let value = calls.remove(index);
 
         // Remove from document tree for serialization consistency
-        if let Some(doc) = &mut self.document {
-            // Ignore error if document doesn't have this handler (e.g., manually added)
-            let _ = doc.remove_handler_call(handler, index);
+        // Try multi_document first, then fall back to single document
+        let removed_in_multi = if let Some(multi_doc) = &mut self.multi_document {
+            // Find which file has this handler
+            if let Some(source_file) = multi_doc.get_handler_source(handler).cloned() {
+                if let Some(doc) = multi_doc.get_document_mut(&source_file) {
+                    let _ = doc.remove_handler_call(handler, index);
+                    multi_doc.mark_dirty(&source_file);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !removed_in_multi {
+            if let Some(doc) = &mut self.document {
+                let _ = doc.remove_handler_call(handler, index);
+            }
         }
 
         Ok(value)

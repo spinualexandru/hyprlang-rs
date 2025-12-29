@@ -1,6 +1,6 @@
 [package]
 name = "hyprlang"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 authors = ["Alex Spinu"]
 description = "A scripting language interpreter and parser for Hyprlang and Hyprland configuration files."
