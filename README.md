@@ -51,7 +51,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.4.0"
+hyprlang = "0.4.1"
 ```
 
 ### Optional Features
@@ -62,7 +62,7 @@ Enable the `hyprland` feature to get a high-level `Hyprland` struct with pre-con
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.4.0", features = ["hyprland"] }
+hyprlang = { version = "0.4.1", features = ["hyprland"] }
 ```
 
 This feature provides:
@@ -76,7 +76,7 @@ Enable the `mutation` feature to modify configuration values and serialize confi
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.4.0", features = ["mutation"] }
+hyprlang = { version = "0.4.1", features = ["mutation"] }
 ```
 
 This feature provides:
