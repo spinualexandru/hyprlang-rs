@@ -1,6 +1,6 @@
 [package]
 name = "hyprlang"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Alex Spinu"]
 description = "A scripting language interpreter and parser for Hyprlang and Hyprland configuration files."
@@ -25,7 +25,7 @@ name = "hyprlang"
 path = "src/lib.rs"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8.1", features = ["html_reports"] }
 
 [[bench]]
 name = "parsing"

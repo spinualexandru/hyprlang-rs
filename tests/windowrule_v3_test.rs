@@ -541,3 +541,161 @@ fn test_layerrule_default_values() {
     assert_eq!(rule.get_string("blur").unwrap(), "");
     assert_eq!(rule.get_string("animation").unwrap(), "");
 }
+
+// ==================== Hyprland 0.53.0 Tests ====================
+
+#[test]
+fn test_bindu_handler() {
+    let mut hypr = Hyprland::new();
+
+    hypr.parse(
+        r#"
+        bindu = SUPER, Y, exec, kitty
+        bindu = SUPER SHIFT, Y, killactive
+    "#,
+    )
+    .unwrap();
+
+    let binds = hypr.all_bindu();
+    assert_eq!(binds.len(), 2);
+    assert_eq!(binds[0], "SUPER, Y, exec, kitty");
+    assert_eq!(binds[1], "SUPER SHIFT, Y, killactive");
+}
+
+#[test]
+fn test_new_config_accessors() {
+    let mut hypr = Hyprland::new();
+
+    hypr.parse(
+        r#"
+        general {
+            locale = en_US
+        }
+
+        quirks {
+            prefer_hdr = 2
+        }
+
+        cursor {
+            hide_on_tablet = true
+        }
+
+        group {
+            groupbar {
+                blur = true
+            }
+        }
+    "#,
+    )
+    .unwrap();
+
+    assert_eq!(hypr.general_locale().unwrap(), "en_US");
+    assert_eq!(hypr.quirks_prefer_hdr().unwrap(), 2);
+    assert!(hypr.cursor_hide_on_tablet().unwrap());
+    assert!(hypr.group_groupbar_blur().unwrap());
+}
+
+#[test]
+fn test_windowrule_match_property_aliases() {
+    let mut hypr = Hyprland::new();
+
+    // Test Hyprland v3 naming with aliases
+    hypr.parse(
+        r#"
+        windowrule[v3-aliases] {
+            match:float = true
+            match:pin = false
+            match:workspace = 5
+            match:fullscreen_state_internal = 1
+            match:fullscreen_state_client = 2
+        }
+    "#,
+    )
+    .unwrap();
+
+    let rule = hypr.get_windowrule("v3-aliases").unwrap();
+
+    // Test the Hyprland v3 naming aliases work
+    assert_eq!(rule.get_int("match:float").unwrap(), 1);
+    assert_eq!(rule.get_int("match:pin").unwrap(), 0);
+    assert_eq!(rule.get_int("match:workspace").unwrap(), 5);
+    assert_eq!(rule.get_int("match:fullscreen_state_internal").unwrap(), 1);
+    assert_eq!(rule.get_int("match:fullscreen_state_client").unwrap(), 2);
+}
+
+#[test]
+fn test_windowrule_effect_property_aliases() {
+    let mut hypr = Hyprland::new();
+
+    // Test v3 naming with underscore aliases
+    hypr.parse(
+        r#"
+        windowrule[v3-effect-aliases] {
+            match:class = test
+            fullscreen_state = 2
+            no_initial_focus = true
+            suppress_event = maximize
+            no_close_for = 5000
+        }
+    "#,
+    )
+    .unwrap();
+
+    let rule = hypr.get_windowrule("v3-effect-aliases").unwrap();
+
+    assert_eq!(rule.get_int("fullscreen_state").unwrap(), 2);
+    assert_eq!(rule.get_int("no_initial_focus").unwrap(), 1);
+    assert_eq!(rule.get_string("suppress_event").unwrap(), "maximize");
+    assert_eq!(rule.get_int("no_close_for").unwrap(), 5000);
+}
+
+#[test]
+fn test_layerrule_new_effects() {
+    let mut hypr = Hyprland::new();
+
+    hypr.parse(
+        r#"
+        layerrule[new-effects] {
+            match:namespace = test-layer
+            blur_popups = true
+            dim_around = 0.5
+            order = 10
+            above_lock = true
+            no_screen_share = true
+        }
+    "#,
+    )
+    .unwrap();
+
+    let rule = hypr.get_layerrule("new-effects").unwrap();
+
+    assert_eq!(rule.get_int("blur_popups").unwrap(), 1);
+    assert_eq!(rule.get_float("dim_around").unwrap(), 0.5);
+    assert_eq!(rule.get_int("order").unwrap(), 10);
+    assert_eq!(rule.get_int("above_lock").unwrap(), 1);
+    assert_eq!(rule.get_int("no_screen_share").unwrap(), 1);
+}
+
+#[test]
+fn test_layerrule_effect_aliases() {
+    let mut hypr = Hyprland::new();
+
+    hypr.parse(
+        r#"
+        layerrule[effect-aliases] {
+            match:namespace = test
+            ignore_alpha = 0.3
+            no_anim = true
+            noscreenshare = true
+        }
+    "#,
+    )
+    .unwrap();
+
+    let rule = hypr.get_layerrule("effect-aliases").unwrap();
+
+    // Test underscore aliases work
+    assert_eq!(rule.get_float("ignore_alpha").unwrap(), 0.3);
+    assert_eq!(rule.get_int("no_anim").unwrap(), 1);
+    assert_eq!(rule.get_int("noscreenshare").unwrap(), 1);
+}
