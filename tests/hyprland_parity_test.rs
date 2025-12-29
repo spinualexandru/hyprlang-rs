@@ -397,8 +397,7 @@ fn test_hyprland_full_config_structure() {
         }
 
         # Device config
-        device {
-            name = test-mouse-1
+        device[test-mouse-1] {
             enabled = true
         }
 

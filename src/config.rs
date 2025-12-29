@@ -378,8 +378,26 @@ impl Config {
                 key,
                 statements,
             } => {
-                // Ensure the category is registered
+                // If category is not registered as special and has no key, treat as regular category
                 if !self.special_categories.is_registered(name) {
+                    if key.is_none() {
+                        // Fall back to regular category block behavior
+                        self.current_path.push(name.clone());
+
+                        for stmt in statements {
+                            if let Err(e) = self.process_statement(stmt) {
+                                if self.options.throw_all_errors {
+                                    self.errors.push(e);
+                                } else {
+                                    self.current_path.pop();
+                                    return Err(e);
+                                }
+                            }
+                        }
+
+                        self.current_path.pop();
+                        return Ok(());
+                    }
                     return Err(ConfigError::category_not_found(name, None));
                 }
 
