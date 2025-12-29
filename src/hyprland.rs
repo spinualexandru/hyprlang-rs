@@ -363,7 +363,40 @@ use crate::types::{Color, ConfigValue};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Wrapper around a special category instance with convenient value accessors
+/// Wrapper around a windowrule or layerrule instance with type-safe value accessors.
+///
+/// This struct provides convenient methods to access properties from windowrule v3
+/// and layerrule v2 special category blocks.
+///
+/// # Example
+///
+/// ```rust
+/// use hyprlang::Hyprland;
+///
+/// let mut hypr = Hyprland::new();
+/// hypr.parse(r#"
+///     windowrule[float-kitty] {
+///         match:class = ^(kitty)$
+///         float = true
+///         size = 800 600
+///         opacity = 0.9
+///         border_color = rgba(33ccffee)
+///     }
+/// "#).unwrap();
+///
+/// let rule = hypr.get_windowrule("float-kitty").unwrap();
+///
+/// // Access different value types
+/// let class_pattern = rule.get_string("match:class").unwrap();
+/// let is_floating = rule.get_int("float").unwrap();  // 1 for true
+/// let opacity = rule.get_float("opacity").unwrap();
+/// let color = rule.get_color("border_color").unwrap();
+///
+/// assert_eq!(class_pattern, "^(kitty)$");
+/// assert_eq!(is_floating, 1);
+/// assert_eq!(opacity, 0.9);
+/// assert_eq!(color.r, 51);  // 0x33
+/// ```
 pub struct RuleInstance<'a> {
     values: HashMap<String, &'a ConfigValue>,
 }
@@ -489,6 +522,7 @@ impl Hyprland {
             "monitor",
             "env",
             "bind",
+            "bindu", // Universal bind flag for submaps (new in 0.53.0)
             "bindm",
             "bindel",
             "bindl",
@@ -569,6 +603,24 @@ impl Hyprland {
             );
         }
 
+        // Match property aliases for Hyprland v3 naming (new in 0.53.0)
+        // These provide alternative names that match Hyprland's actual property names
+        let match_aliases = [
+            "float",                   // Alias for "floating"
+            "pin",                     // Alias for "pinned"
+            "workspace",               // Alias for "on_workspace"
+            "fullscreen_state_internal", // Alias for "fullscreenstate_internal"
+            "fullscreen_state_client",   // Alias for "fullscreenstate_client"
+        ];
+
+        for alias in match_aliases {
+            config.register_special_category_value(
+                "windowrule",
+                format!("match:{}", alias),
+                ConfigValue::String(String::new()),
+            );
+        }
+
         // Effect properties (60+ from WindowRuleEffectContainer.hpp)
         // Note: Many properties have aliases (e.g., border_color / bordercolor)
         let effect_props = [
@@ -578,6 +630,7 @@ impl Hyprland {
             "fullscreen",
             "maximize",
             "fullscreenstate",
+            "fullscreen_state", // Alias for fullscreenstate (new in 0.53.0)
             "move",
             "size",
             "center",
@@ -585,11 +638,14 @@ impl Hyprland {
             "monitor",
             "workspace",
             "noinitialfocus",
+            "no_initial_focus", // Alias for noinitialfocus (new in 0.53.0)
             "pin",
             "group",
             "suppressevent",
+            "suppress_event", // Alias for suppressevent (new in 0.53.0)
             "content",
             "noclosefor",
+            "no_close_for", // Alias for noclosefor (new in 0.53.0)
             // Dynamic effects (continuously applied)
             "rounding",
             "rounding_power",
@@ -687,12 +743,20 @@ impl Hyprland {
 
         // Effect properties for layer surfaces
         let effect_props = [
-            "blur",        // Enable blur
-            "ignorealpha", // Ignore alpha
-            "ignorezero",  // Ignore zero alpha
-            "animation",   // Animation style
-            "noanim",      // Disable animations
-            "xray",        // X-ray mode
+            "blur",           // Enable blur
+            "blur_popups",    // Blur popups (new in 0.53.0)
+            "ignorealpha",    // Ignore alpha
+            "ignore_alpha",   // Alias for ignorealpha (new in 0.53.0)
+            "ignorezero",     // Ignore zero alpha
+            "animation",      // Animation style
+            "noanim",         // Disable animations
+            "no_anim",        // Alias for noanim (new in 0.53.0)
+            "xray",           // X-ray mode
+            "dim_around",     // Dim around layer (new in 0.53.0)
+            "order",          // Layer order (new in 0.53.0)
+            "above_lock",     // Display above lock screen (new in 0.53.0)
+            "no_screen_share", // Exclude from screen share (new in 0.53.0)
+            "noscreenshare",  // Alias for no_screen_share
         ];
 
         for prop in effect_props {
@@ -751,6 +815,13 @@ impl Hyprland {
             ConfigValue::String(s) => Ok(s == "true" || s == "yes" || s == "on" || s == "1"),
             _ => Ok(false),
         }
+    }
+
+    /// Get general:locale - overrides system locale (new in 0.53.0)
+    ///
+    /// Example: "en_US", "es", "de_DE"
+    pub fn general_locale(&self) -> ParseResult<&str> {
+        self.config.get_string("general:locale")
     }
 
     // ==================== Decoration Config ====================
@@ -858,6 +929,37 @@ impl Hyprland {
         self.config.get_int("misc:force_default_wallpaper")
     }
 
+    // ==================== Quirks Config (new in 0.53.0) ====================
+
+    /// Get quirks:prefer_hdr - HDR preference (new in 0.53.0)
+    ///
+    /// Returns: 0 = off (default), 1 = always report HDR, 2 = gamescope only
+    pub fn quirks_prefer_hdr(&self) -> ParseResult<i64> {
+        self.config.get_int("quirks:prefer_hdr")
+    }
+
+    // ==================== Cursor Config ====================
+
+    /// Get cursor:hide_on_tablet - hides cursor when last input was tablet (new in 0.53.0)
+    pub fn cursor_hide_on_tablet(&self) -> ParseResult<bool> {
+        match self.config.get("cursor:hide_on_tablet")? {
+            ConfigValue::Int(i) => Ok(*i != 0),
+            ConfigValue::String(s) => Ok(s == "true" || s == "yes" || s == "on" || s == "1"),
+            _ => Ok(false),
+        }
+    }
+
+    // ==================== Group Config ====================
+
+    /// Get group:groupbar:blur - applies blur to groupbar (new in 0.53.0)
+    pub fn group_groupbar_blur(&self) -> ParseResult<bool> {
+        match self.config.get("group:groupbar:blur")? {
+            ConfigValue::Int(i) => Ok(*i != 0),
+            ConfigValue::String(s) => Ok(s == "true" || s == "yes" || s == "on" || s == "1"),
+            _ => Ok(false),
+        }
+    }
+
     // ==================== Dwindle Layout ====================
 
     /// Get dwindle:pseudotile
@@ -919,7 +1021,26 @@ impl Hyprland {
             .unwrap_or_default()
     }
 
-    /// Get all windowrule definitions (v1/v2 handler-based syntax, deprecated)
+    /// Get all bindu definitions (universal submap bindings, new in 0.53.0)
+    ///
+    /// Universal binds remain active across all submaps.
+    pub fn all_bindu(&self) -> Vec<&String> {
+        self.config
+            .get_handler_calls("bindu")
+            .map(|calls| calls.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get all windowrule definitions (v1 handler-based syntax)
+    ///
+    /// **DEPRECATED in Hyprland 0.53.0**: The `windowrule` handler syntax is deprecated.
+    /// Use the new v3 special category syntax instead:
+    /// ```conf
+    /// windowrule[rule-name] {
+    ///     match:class = ^(kitty)$
+    ///     float = true
+    /// }
+    /// ```
     ///
     /// This returns windowrule handler calls from old configs using:
     /// ```conf
@@ -928,6 +1049,10 @@ impl Hyprland {
     ///
     /// For new v3 syntax, use [`windowrule_names()`](Self::windowrule_names) and
     /// [`get_windowrule()`](Self::get_windowrule) instead.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use windowrule v3 syntax via windowrule_names() and get_windowrule() instead"
+    )]
     pub fn all_windowrules(&self) -> Vec<&String> {
         self.config
             .get_handler_calls("windowrule")
@@ -935,7 +1060,16 @@ impl Hyprland {
             .unwrap_or_default()
     }
 
-    /// Get all windowrulev2 definitions (v2 handler-based syntax, deprecated)
+    /// Get all windowrulev2 definitions (v2 handler-based syntax)
+    ///
+    /// **DEPRECATED in Hyprland 0.53.0**: The `windowrulev2` handler syntax is deprecated.
+    /// Use the new v3 special category syntax instead:
+    /// ```conf
+    /// windowrule[rule-name] {
+    ///     match:class = ^(kitty)$
+    ///     float = true
+    /// }
+    /// ```
     ///
     /// This returns windowrulev2 handler calls from old configs using:
     /// ```conf
@@ -944,6 +1078,10 @@ impl Hyprland {
     ///
     /// For new v3 syntax, use [`windowrule_names()`](Self::windowrule_names) and
     /// [`get_windowrule()`](Self::get_windowrule) instead.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use windowrule v3 syntax via windowrule_names() and get_windowrule() instead"
+    )]
     pub fn all_windowrulesv2(&self) -> Vec<&String> {
         self.config
             .get_handler_calls("windowrulev2")
@@ -955,43 +1093,82 @@ impl Hyprland {
     ///
     /// Returns the names of all windowrule blocks defined in the config:
     /// ```conf
-    /// windowrule {
-    ///     name = my-float-rule
+    /// windowrule[my-float-rule] {
     ///     match:class = ^(kitty)$
     ///     float = true
     /// }
+    ///
+    /// windowrule[center-dialogs] {
+    ///     match:title = ^(Open File)$
+    ///     center = true
+    /// }
     /// ```
     ///
-    /// Returns `vec!["my-float-rule"]`
+    /// Returns `vec!["my-float-rule", "center-dialogs"]`
+    ///
+    /// Use with [`get_windowrule()`](Self::get_windowrule) to iterate all rules:
+    /// ```rust
+    /// use hyprlang::Hyprland;
+    ///
+    /// let mut hypr = Hyprland::new();
+    /// hypr.parse(r#"
+    ///     windowrule[test] {
+    ///         match:class = test
+    ///     }
+    /// "#).unwrap();
+    ///
+    /// for name in hypr.windowrule_names() {
+    ///     let rule = hypr.get_windowrule(&name).unwrap();
+    ///     // Access rule properties...
+    /// }
+    /// ```
     pub fn windowrule_names(&self) -> Vec<String> {
         self.config.list_special_category_keys("windowrule")
     }
 
     /// Get a specific windowrule by name (v3 special category syntax)
     ///
-    /// Returns all properties of a windowrule block:
+    /// Returns a [`RuleInstance`] with all properties of a windowrule block:
     /// ```conf
-    /// windowrule {
-    ///     name = my-rule
+    /// windowrule[my-rule] {
     ///     match:class = ^(kitty)$
     ///     float = true
     ///     size = 800 600
+    ///     opacity = 0.95
+    ///     border_color = rgba(33ccffee)
     /// }
     /// ```
     ///
-    /// Access properties:
+    /// Access properties with type-safe methods:
     /// ```rust
-    /// # use hyprlang::{Hyprland, ConfigValue};
+    /// # use hyprlang::Hyprland;
     /// # let mut hypr = Hyprland::new();
     /// # hypr.parse(r#"
     /// # windowrule[my-rule] {
     /// #     match:class = ^(kitty)$
-    /// #     float = yes_please
+    /// #     float = true
+    /// #     size = 800 600
+    /// #     opacity = 0.95
+    /// #     border_color = rgba(33ccffee)
     /// # }
     /// # "#).unwrap();
     /// let rule = hypr.get_windowrule("my-rule").unwrap();
+    ///
+    /// // String values
     /// let class_match = rule.get_string("match:class").unwrap();
-    /// let is_float = rule.get_string("float").unwrap();
+    /// assert_eq!(class_match, "^(kitty)$");
+    ///
+    /// // Integer values (booleans become 0/1)
+    /// let is_float = rule.get_int("float").unwrap();
+    /// assert_eq!(is_float, 1);
+    ///
+    /// // Float values
+    /// let opacity = rule.get_float("opacity").unwrap();
+    /// assert_eq!(opacity, 0.95);
+    ///
+    /// // Color values
+    /// let color = rule.get_color("border_color").unwrap();
+    /// assert_eq!(color.r, 51);  // 0x33
     /// ```
     pub fn get_windowrule(&self, name: &str) -> ParseResult<RuleInstance<'_>> {
         self.config
@@ -999,12 +1176,25 @@ impl Hyprland {
             .map(RuleInstance::new)
     }
 
-    /// Get all layerrule definitions (v1 handler-based syntax, deprecated)
+    /// Get all layerrule definitions (v1 handler-based syntax)
+    ///
+    /// **DEPRECATED in Hyprland 0.53.0**: The `layerrule` handler syntax is deprecated.
+    /// Use the new v2 special category syntax instead:
+    /// ```conf
+    /// layerrule[rule-name] {
+    ///     match:namespace = waybar
+    ///     blur = true
+    /// }
+    /// ```
     ///
     /// This returns layerrule handler calls from old configs.
     ///
     /// For new v2 syntax, use [`layerrule_names()`](Self::layerrule_names) and
     /// [`get_layerrule()`](Self::get_layerrule) instead.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use layerrule v2 syntax via layerrule_names() and get_layerrule() instead"
+    )]
     pub fn all_layerrules(&self) -> Vec<&String> {
         self.config
             .get_handler_calls("layerrule")
@@ -1016,19 +1206,66 @@ impl Hyprland {
     ///
     /// Returns the names of all layerrule blocks defined in the config:
     /// ```conf
-    /// layerrule {
-    ///     name = blur-waybar
+    /// layerrule[blur-waybar] {
     ///     match:namespace = waybar
     ///     blur = true
     /// }
+    ///
+    /// layerrule[dim-notifications] {
+    ///     match:namespace = ^(mako|dunst)$
+    ///     dim_around = true
+    /// }
     /// ```
     ///
-    /// Returns `vec!["blur-waybar"]`
+    /// Returns `vec!["blur-waybar", "dim-notifications"]`
+    ///
+    /// Use with [`get_layerrule()`](Self::get_layerrule) to iterate all rules:
+    /// ```rust
+    /// use hyprlang::Hyprland;
+    ///
+    /// let mut hypr = Hyprland::new();
+    /// hypr.parse(r#"
+    ///     layerrule[test] {
+    ///         match:namespace = test
+    ///     }
+    /// "#).unwrap();
+    ///
+    /// for name in hypr.layerrule_names() {
+    ///     let rule = hypr.get_layerrule(&name).unwrap();
+    ///     // Access rule properties...
+    /// }
+    /// ```
     pub fn layerrule_names(&self) -> Vec<String> {
         self.config.list_special_category_keys("layerrule")
     }
 
     /// Get a specific layerrule by name (v2 special category syntax)
+    ///
+    /// Returns a [`RuleInstance`] with all properties of a layerrule block:
+    /// ```conf
+    /// layerrule[blur-waybar] {
+    ///     match:namespace = waybar
+    ///     blur = true
+    ///     ignorealpha = 0.5
+    /// }
+    /// ```
+    ///
+    /// Access properties:
+    /// ```rust
+    /// # use hyprlang::Hyprland;
+    /// # let mut hypr = Hyprland::new();
+    /// # hypr.parse(r#"
+    /// # layerrule[blur-waybar] {
+    /// #     match:namespace = waybar
+    /// #     blur = true
+    /// #     ignorealpha = 0.5
+    /// # }
+    /// # "#).unwrap();
+    /// let rule = hypr.get_layerrule("blur-waybar").unwrap();
+    /// let namespace = rule.get_string("match:namespace").unwrap();
+    /// let is_blur = rule.get_int("blur").unwrap();
+    /// let alpha = rule.get_float("ignorealpha").unwrap();
+    /// ```
     pub fn get_layerrule(&self, name: &str) -> ParseResult<RuleInstance<'_>> {
         self.config
             .get_special_category("layerrule", name)

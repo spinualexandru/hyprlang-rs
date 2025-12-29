@@ -14,9 +14,13 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 ![Crates.io Size](https://img.shields.io/crates/size/hyprlang)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/spinualexandru)](https://github.com/sponsors/spinualexandru)
 
+Parity:
+- For Hyprland < 0.53.0, use hyprlang-rs v0.3.x
+- For Hyprland >= 0.53.0, use hyprlang-rs v0.4.x
+
 ## Features
 
-- 🎯 **Complete Hyprlang Implementation** - Full compatibility with the original C++ version
+- 🎯 **Complete Hyprlang Implementation** - Full compatibility with the original C++ version and Hyprland 0.53.0
 - 🚀 **Fast PEG Parser** - Built with [pest](https://pest.rs/) for efficient parsing
 - 🔧 **Type-Safe API** - Strongly-typed configuration values (Int, Float, String, Vec2, Color)
 - 📦 **Variable System** - Support for user-defined and environment variables with cycle detection
@@ -31,7 +35,7 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 - 🔄 **Mutation & Serialization** - Modify config values and save back to files (optional)
 - 📁 **Multi-File Mutation Tracking** - Track and save changes to the correct source file when using `source` directives
 - 🎯 **Windowrule v3 / Layerrule v2** - Full support for new special category syntax with 85+ registered properties
-- ✅ **Fully Tested** - 177 tests covering all features
+- ✅ **Fully Tested** - 207 tests covering all features
 
 ## Benchmarks
 
@@ -47,7 +51,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.3.0"
+hyprlang = "0.4.0"
 ```
 
 ### Optional Features
@@ -58,7 +62,7 @@ Enable the `hyprland` feature to get a high-level `Hyprland` struct with pre-con
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.3.0", features = ["hyprland"] }
+hyprlang = { version = "0.4.0", features = ["hyprland"] }
 ```
 
 This feature provides:
@@ -72,7 +76,7 @@ Enable the `mutation` feature to modify configuration values and serialize confi
 
 ```toml
 [dependencies]
-hyprlang = { version = "0.3.0", features = ["mutation"] }
+hyprlang = { version = "0.4.0", features = ["mutation"] }
 ```
 
 This feature provides:
@@ -246,6 +250,7 @@ hypr.general_layout() -> Result<&str>              // "dwindle" or "master"
 hypr.general_allow_tearing() -> Result<bool>
 hypr.general_active_border_color() -> Result<Color>
 hypr.general_inactive_border_color() -> Result<Color>
+hypr.general_locale() -> Result<&str>              // Locale override (new in 0.53.0)
 ```
 
 #### Decoration Settings
@@ -286,15 +291,31 @@ hypr.misc_disable_hyprland_logo() -> Result<bool>
 hypr.misc_force_default_wallpaper() -> Result<i64>
 ```
 
+#### Quirks Settings (new in 0.53.0)
+```rust
+hypr.quirks_prefer_hdr() -> Result<i64>     // 0=off, 1=always HDR, 2=gamescope only
+```
+
+#### Cursor Settings (new in 0.53.0)
+```rust
+hypr.cursor_hide_on_tablet() -> Result<bool> // Hide cursor on tablet input
+```
+
+#### Group Settings (new in 0.53.0)
+```rust
+hypr.group_groupbar_blur() -> Result<bool>   // Groupbar blur effect
+```
+
 #### Handler Calls (Arrays)
 ```rust
 hypr.all_binds() -> Vec<&String>            // All bind definitions
+hypr.all_bindu() -> Vec<&String>            // All universal submap binds (new in 0.53.0)
 hypr.all_bindm() -> Vec<&String>            // All mouse bindings
 hypr.all_bindel() -> Vec<&String>           // All bindel definitions
 hypr.all_bindl() -> Vec<&String>            // All bindl definitions
-hypr.all_windowrules() -> Vec<&String>      // All windowrule v1 definitions (deprecated)
-hypr.all_windowrulesv2() -> Vec<&String>    // All windowrule v2 definitions (deprecated)
-hypr.all_layerrules() -> Vec<&String>       // All layerrule v1 definitions (deprecated)
+hypr.all_windowrules() -> Vec<&String>      // All windowrule v1 definitions (DEPRECATED)
+hypr.all_windowrulesv2() -> Vec<&String>    // All windowrule v2 definitions (DEPRECATED)
+hypr.all_layerrules() -> Vec<&String>       // All layerrule v1 definitions (DEPRECATED)
 hypr.all_workspaces() -> Vec<&String>       // All workspace definitions
 hypr.all_monitors() -> Vec<&String>         // All monitor definitions
 hypr.all_env() -> Vec<&String>              // All env definitions
@@ -346,9 +367,9 @@ The `Hyprland` struct automatically registers these handlers:
 **Root-level handlers:**
 - `monitor` - Monitor configuration
 - `env` - Environment variables
-- `bind`, `bindm`, `bindel`, `bindl`, `bindr`, `binde`, `bindn` - Keybindings
-- `windowrule`, `windowrulev2` - Window rules
-- `layerrule` - Layer rules
+- `bind`, `bindu`, `bindm`, `bindel`, `bindl`, `bindr`, `binde`, `bindn` - Keybindings (`bindu` for universal submap binds, new in 0.53.0)
+- `windowrule`, `windowrulev2` - Window rules (deprecated, use v3 special category syntax)
+- `layerrule` - Layer rules (deprecated, use v2 special category syntax)
 - `workspace` - Workspace configuration
 - `exec`, `exec-once` - Commands
 - `source` - File inclusion
@@ -649,9 +670,54 @@ let v2_rules = hypr.all_windowrulesv2();
 **Layerrule v2 - Match Properties (6):**
 - `match:namespace`, `match:address`, `match:class`, `match:title`, `match:monitor`, `match:layer`
 
-**Layerrule v2 - Effect Properties (6):**
-- `blur`, `ignorealpha`, `ignorezero`, `animation`, `noanim`, `xray`
+**Layerrule v2 - Effect Properties (14, updated in 0.53.0):**
+- `blur`, `blur_popups` (new), `ignorealpha`/`ignore_alpha`, `ignorezero`, `animation`, `noanim`/`no_anim`, `xray`
+- `dim_around` (new), `order` (new), `above_lock` (new), `no_screen_share`/`noscreenshare` (new)
 ```
+
+#### Migration from Deprecated v1/v2 Methods
+
+The old handler-based methods (`all_windowrules()`, `all_windowrulesv2()`, `all_layerrules()`) are deprecated in hyprlang-rs 0.4.0. Here's how to migrate:
+
+**Old approach (deprecated):**
+```rust
+// Returns raw handler strings like "float, class:^(kitty)$"
+let rules = hypr.all_windowrulesv2();
+for rule_str in rules {
+    // Manual parsing required
+    println!("{}", rule_str);
+}
+```
+
+**New approach (v3 special categories):**
+```rust
+// Iterate all windowrules with structured access
+for name in hypr.windowrule_names() {
+    let rule = hypr.get_windowrule(&name)?;
+
+    // Type-safe property access
+    if let Ok(class) = rule.get_string("match:class") {
+        println!("Rule '{}' matches class: {}", name, class);
+    }
+    if let Ok(is_float) = rule.get_int("float") {
+        println!("  float = {}", is_float == 1);
+    }
+}
+
+// Same for layerrules
+for name in hypr.layerrule_names() {
+    let rule = hypr.get_layerrule(&name)?;
+    if let Ok(ns) = rule.get_string("match:namespace") {
+        println!("Layerrule '{}' matches: {}", name, ns);
+    }
+}
+```
+
+The new v3 syntax provides:
+- **Named rules** - Each rule has an identifier for easy lookup
+- **Structured properties** - Access individual properties by key
+- **Type safety** - Get values as the correct type (string, int, float, color)
+- **Better organization** - Match conditions and effects in one block
 
 ### Source Directive
 
