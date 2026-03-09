@@ -2,6 +2,15 @@
 
 use hyprlang::{Config, ConfigValue};
 
+fn register_device_category(config: &mut Config) {
+    use hyprlang::SpecialCategoryDescriptor;
+
+    config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
+    config.register_special_category_value("device", "repeat_rate", ConfigValue::Int(0));
+    config.register_special_category_value("device", "tap_to_click", ConfigValue::Int(0));
+}
+
 #[test]
 fn test_serialize_synthetic() {
     let mut config = Config::new();
@@ -183,11 +192,9 @@ key = value1
 
 #[test]
 fn test_round_trip_with_all_types() {
-    use hyprlang::SpecialCategoryDescriptor;
-
     let mut config1 = Config::new();
     config1.register_handler_fn("bind", |_ctx| Ok(()));
-    config1.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    register_device_category(&mut config1);
 
     config1
         .parse(
@@ -209,7 +216,7 @@ device[mouse] {
 
     let mut config2 = Config::new();
     config2.register_handler_fn("bind", |_ctx| Ok(()));
-    config2.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    register_device_category(&mut config2);
     config2.parse(&serialized).unwrap();
 
     // Verify all values preserved
@@ -264,10 +271,8 @@ bind = SUPER, C, exec, editor
 
 #[test]
 fn test_round_trip_after_special_category_removal() {
-    use hyprlang::SpecialCategoryDescriptor;
-
     let mut config = Config::new();
-    config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    register_device_category(&mut config);
 
     config
         .parse(
@@ -294,7 +299,7 @@ device[touchpad] {
     let serialized = config.serialize();
 
     let mut config2 = Config::new();
-    config2.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    register_device_category(&mut config2);
     config2.parse(&serialized).unwrap();
 
     // Verify mouse and touchpad exist, keyboard doesn't

@@ -125,8 +125,8 @@ pub struct SpecialCategoryManager {
     /// Instances of special categories: category_name -> key -> instance
     instances: HashMap<String, HashMap<String, SpecialCategoryInstance>>,
 
-    /// Counter for anonymous category keys
-    anonymous_counters: HashMap<String, usize>,
+    /// Next auto-assigned anonymous key (global across categories, matching upstream)
+    next_anonymous_key: usize,
 }
 
 impl SpecialCategoryManager {
@@ -134,13 +134,28 @@ impl SpecialCategoryManager {
         Self {
             descriptors: HashMap::new(),
             instances: HashMap::new(),
-            anonymous_counters: HashMap::new(),
+            next_anonymous_key: 1,
         }
     }
 
     /// Register a special category descriptor
     pub fn register(&mut self, descriptor: SpecialCategoryDescriptor) {
-        self.descriptors.insert(descriptor.name.clone(), descriptor);
+        let category_name = descriptor.name.clone();
+        let category_type = descriptor.category_type;
+        let default_values = descriptor.default_values.clone();
+
+        self.descriptors.insert(category_name.clone(), descriptor);
+
+        if category_type == SpecialCategoryType::Static {
+            let instances = self.instances.entry(category_name).or_default();
+            let instance = instances
+                .entry("static".to_string())
+                .or_insert_with(|| SpecialCategoryInstance::new(Some("static".to_string())));
+
+            for (prop_name, default_value) in default_values {
+                instance.set(prop_name, ConfigValueEntry::with_default(default_value));
+            }
+        }
     }
 
     /// Check if a category is registered
@@ -179,31 +194,28 @@ impl SpecialCategoryManager {
                 "static".to_string()
             }
             SpecialCategoryType::Anonymous => {
-                if key.is_some() {
-                    return Err(ConfigError::custom(format!(
-                        "Anonymous category '{}' cannot have an explicit key",
-                        category_name
-                    )));
+                if let Some(explicit_key) = key {
+                    explicit_key
+                } else {
+                    let key = self.next_anonymous_key.to_string();
+                    self.next_anonymous_key += 1;
+                    key
                 }
-                let counter = self
-                    .anonymous_counters
-                    .entry(category_name.to_string())
-                    .or_insert(0);
-                let key = format!("anonymous_{}", counter);
-                *counter += 1;
-                key
             }
         };
+
+        if self.instance_exists(category_name, &instance_key) {
+            return Ok(instance_key);
+        }
 
         // Create the instance with default values
         let mut instance = SpecialCategoryInstance::new(Some(instance_key.clone()));
 
         // Apply default values from descriptor
         for (prop_name, default_value) in &descriptor.default_values {
-            let raw = default_value.to_string();
             instance.set(
                 prop_name.clone(),
-                ConfigValueEntry::new(default_value.clone(), raw),
+                ConfigValueEntry::with_default(default_value.clone()),
             );
         }
 
@@ -291,6 +303,15 @@ impl SpecialCategoryManager {
 
     /// Get all keys for a special category
     pub fn list_keys(&self, category_name: &str) -> Vec<String> {
+        if self
+            .descriptors
+            .get(category_name)
+            .map(|descriptor| descriptor.category_type == SpecialCategoryType::Static)
+            .unwrap_or(false)
+        {
+            return Vec::new();
+        }
+
         self.instances
             .get(category_name)
             .map(|instances| instances.keys().cloned().collect())
@@ -325,10 +346,135 @@ impl SpecialCategoryManager {
             .unwrap_or(false)
     }
 
-    /// Clear all instances (but keep descriptors)
-    pub fn clear_instances(&mut self) {
+    /// Find a registered special category whose name is a prefix of the given key path.
+    ///
+    /// For colon-scoped categories like `specialGeneric:one`, this matches when the
+    /// full key is `specialGeneric:one:value`. Returns (category_name, property_name).
+    pub fn find_matching_category(&self, full_key: &str) -> Option<(String, String)> {
+        // Check longest names first to match most specific category
+        let mut matches: Vec<_> = self
+            .descriptors
+            .keys()
+            .filter(|name| {
+                full_key.starts_with(name.as_str()) && full_key[name.len()..].starts_with(':')
+            })
+            .collect();
+        matches.sort_by(|a, b| b.len().cmp(&a.len()));
+
+        matches.first().map(|name| {
+            let prop = full_key[name.len() + 1..].to_string();
+            (name.to_string(), prop)
+        })
+    }
+
+    /// Find a registered special category whose segment path is a prefix of the given segments.
+    ///
+    /// Returns the full category name and the number of path segments it consumed.
+    pub fn find_matching_category_segments(
+        &self,
+        path_segments: &[String],
+    ) -> Option<(String, usize)> {
+        let mut best_match: Option<(String, usize)> = None;
+
+        for name in self.descriptors.keys() {
+            let descriptor_segments: Vec<&str> = name.split(':').collect();
+            if descriptor_segments.len() > path_segments.len() {
+                continue;
+            }
+
+            if descriptor_segments
+                .iter()
+                .zip(path_segments.iter())
+                .all(|(expected, actual)| expected == actual)
+            {
+                match &best_match {
+                    Some((_, best_len)) if *best_len >= descriptor_segments.len() => {}
+                    _ => best_match = Some((name.clone(), descriptor_segments.len())),
+                }
+            }
+        }
+
+        best_match
+    }
+
+    /// Add a default value to a special category descriptor.
+    ///
+    /// Static categories are updated immediately to mirror upstream behavior.
+    pub fn add_default_value(
+        &mut self,
+        category_name: &str,
+        property: String,
+        default_value: ConfigValue,
+    ) -> ParseResult<()> {
+        let is_static = {
+            let descriptor = self
+                .descriptors
+                .get_mut(category_name)
+                .ok_or_else(|| ConfigError::category_not_found(category_name, None))?;
+            descriptor
+                .default_values
+                .insert(property.clone(), default_value.clone());
+            descriptor.category_type == SpecialCategoryType::Static
+        };
+
+        if is_static {
+            let instance_key = self.create_instance(category_name, None)?;
+            if let Ok(instance) = self.get_instance_mut(category_name, &instance_key) {
+                instance.set(property, ConfigValueEntry::with_default(default_value));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove a default value from a special category descriptor and all existing instances.
+    pub fn remove_default_value(&mut self, category_name: &str, property: &str) -> ParseResult<()> {
+        let descriptor = self
+            .descriptors
+            .get_mut(category_name)
+            .ok_or_else(|| ConfigError::category_not_found(category_name, None))?;
+        descriptor.default_values.remove(property);
+
+        if let Some(instances) = self.instances.get_mut(category_name) {
+            for instance in instances.values_mut() {
+                instance.values.remove(property);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove a registered special category and all instances.
+    pub fn remove_category(&mut self, category_name: &str) {
+        self.descriptors.remove(category_name);
+        self.instances.remove(category_name);
+    }
+
+    /// Reset instances to their pre-parse state.
+    ///
+    /// Static categories keep a static instance populated from defaults. Keyed and anonymous
+    /// categories are cleared completely.
+    pub fn reset_for_parse(&mut self) {
+        self.next_anonymous_key = 1;
+
+        let descriptors: Vec<_> = self.descriptors.values().cloned().collect();
         self.instances.clear();
-        self.anonymous_counters.clear();
+
+        for descriptor in descriptors {
+            if descriptor.category_type != SpecialCategoryType::Static {
+                continue;
+            }
+
+            let mut instance = SpecialCategoryInstance::new(Some("static".to_string()));
+            for (prop_name, default_value) in descriptor.default_values {
+                instance.set(prop_name, ConfigValueEntry::with_default(default_value));
+            }
+
+            self.instances
+                .entry(descriptor.name)
+                .or_default()
+                .insert("static".to_string(), instance);
+        }
     }
 }
 
@@ -383,9 +529,9 @@ mod tests {
         let key2 = manager.create_instance("item", None).unwrap();
         let key3 = manager.create_instance("item", None).unwrap();
 
-        assert_eq!(key1, "anonymous_0");
-        assert_eq!(key2, "anonymous_1");
-        assert_eq!(key3, "anonymous_2");
+        assert_eq!(key1, "1");
+        assert_eq!(key2, "2");
+        assert_eq!(key3, "3");
     }
 
     #[test]

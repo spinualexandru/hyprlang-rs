@@ -11,6 +11,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// A line that references a variable, tracked for dynamic variable propagation
+#[derive(Debug, Clone)]
+struct VariableLine {
+    /// The raw statement that references the variable
+    statement: Statement,
+    /// The category path at the time the statement was processed
+    category_path: Vec<String>,
+}
+
 /// Main configuration manager
 pub struct Config {
     /// Configuration values: category_path:key -> value
@@ -49,6 +58,14 @@ pub struct Config {
     /// Collected errors (when throw_all_errors is enabled)
     errors: Vec<ConfigError>,
 
+    /// Lines that reference each variable (for dynamic variable propagation)
+    variable_lines: HashMap<String, Vec<VariableLine>>,
+
+    /// Whether this parse context should record variable dependency lines.
+    ///
+    /// Upstream only records dependencies during non-dynamic parsing.
+    record_variable_lines: bool,
+
     /// Document structure (for full-fidelity serialization)
     #[cfg(feature = "mutation")]
     document: Option<crate::document::ConfigDocument>,
@@ -77,6 +94,15 @@ pub struct ConfigOptions {
 
     /// Base directory for resolving source directives
     pub base_dir: Option<PathBuf>,
+
+    /// Parse without setting values (dry-run validation)
+    pub verify_only: bool,
+
+    /// Don't error on missing config file
+    pub allow_missing_config: bool,
+
+    /// Treat path as raw config string instead of a file path
+    pub path_is_stream: bool,
 }
 
 impl Default for ConfigOptions {
@@ -85,6 +111,9 @@ impl Default for ConfigOptions {
             throw_all_errors: false,
             allow_dynamic_parsing: true,
             base_dir: None,
+            verify_only: false,
+            allow_missing_config: false,
+            path_is_stream: false,
         }
     }
 }
@@ -105,6 +134,8 @@ impl Config {
             options: ConfigOptions::default(),
             current_path: Vec::new(),
             errors: Vec::new(),
+            variable_lines: HashMap::new(),
+            record_variable_lines: true,
             #[cfg(feature = "mutation")]
             document: None,
             #[cfg(feature = "mutation")]
@@ -133,6 +164,8 @@ impl Config {
             options,
             current_path: Vec::new(),
             errors: Vec::new(),
+            variable_lines: HashMap::new(),
+            record_variable_lines: true,
             #[cfg(feature = "mutation")]
             document: None,
             #[cfg(feature = "mutation")]
@@ -146,23 +179,65 @@ impl Config {
 
     /// Initialize the configuration (called before parsing)
     pub fn commence(&mut self) -> ParseResult<()> {
-        // Reset state
         self.errors.clear();
         self.directives.reset();
+        self.current_path.clear();
         Ok(())
+    }
+
+    fn reset_top_level_state(&mut self) {
+        self.errors.clear();
+        self.directives.reset();
+        self.current_path.clear();
+        self.values.clear();
+        self.handler_calls.clear();
+        self.variables.clear();
+        self.variable_lines.clear();
+        self.record_variable_lines = true;
+        self.expressions = ExpressionEvaluator::new();
+        self.special_categories.reset_for_parse();
+
+        if let Some(resolver) = &mut self.source_resolver {
+            resolver.reset();
+        }
+
+        #[cfg(feature = "mutation")]
+        {
+            self.document = None;
+            self.source_file = None;
+            self.multi_document = None;
+            self.current_source_file = None;
+        }
     }
 
     /// Parse a configuration file
     pub fn parse_file(&mut self, path: impl AsRef<Path>) -> ParseResult<()> {
         let path = path.as_ref();
+
+        // If path_is_stream, treat the path string as raw config content
+        if self.options.path_is_stream {
+            let content = path.to_string_lossy().to_string();
+            return self.parse(&content);
+        }
+
+        self.reset_top_level_state();
+
+        // Check if file exists - handle allow_missing_config
+        if !path.exists() {
+            if self.options.allow_missing_config {
+                return Ok(());
+            }
+            return Err(ConfigError::io(
+                path.display().to_string(),
+                "file not found",
+            ));
+        }
+
         let canonical_path = path
             .canonicalize()
             .unwrap_or_else(|_| path.to_path_buf());
 
-        // Set base dir from file path if not already set
-        if self.options.base_dir.is_none()
-            && let Some(parent) = path.parent()
-        {
+        if let Some(parent) = path.parent() {
             self.options.base_dir = Some(parent.to_path_buf());
             self.source_resolver = Some(SourceResolver::new(parent));
         }
@@ -180,11 +255,11 @@ impl Config {
         }
 
         // Parse the file with path tracking
-        self.parse_file_internal(&canonical_path)
+        self.parse_file_internal(&canonical_path, true)
     }
 
     /// Internal method to parse a file with path tracking
-    fn parse_file_internal(&mut self, path: &Path) -> ParseResult<()> {
+    fn parse_file_internal(&mut self, path: &Path, top_level: bool) -> ParseResult<()> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| ConfigError::io(path.display().to_string(), e.to_string()))?;
 
@@ -195,12 +270,22 @@ impl Config {
         }
 
         // Parse the content
-        self.parse_with_path(&content, Some(path))
+        self.parse_with_path(&content, Some(path), top_level)
     }
 
     /// Parse content with an associated file path
-    fn parse_with_path(&mut self, input: &str, source_path: Option<&Path>) -> ParseResult<()> {
-        self.commence()?;
+    fn parse_with_path(
+        &mut self,
+        input: &str,
+        _source_path: Option<&Path>,
+        top_level: bool,
+    ) -> ParseResult<()> {
+        if top_level {
+            self.commence()?;
+        }
+
+        #[cfg(feature = "mutation")]
+        let previous_source_file = self.current_source_file.clone();
 
         #[cfg(feature = "mutation")]
         let (parsed, mut document) = HyprlangParser::parse_with_document(input)?;
@@ -210,31 +295,48 @@ impl Config {
         #[cfg(feature = "mutation")]
         {
             // Set the source path on the document
-            if let Some(path) = source_path {
+            if let Some(path) = _source_path {
                 document.source_path = Some(path.to_path_buf());
             }
 
             // Store document in multi_document if available
-            if let (Some(multi_doc), Some(path)) = (&mut self.multi_document, source_path) {
+            if let (Some(multi_doc), Some(path)) = (&mut self.multi_document, _source_path) {
                 multi_doc.add_document(path.to_path_buf(), document.clone());
             }
 
             // Also keep backward-compatible single document
-            self.document = Some(document);
+            if top_level || _source_path.is_none() {
+                self.document = Some(document.clone());
+            }
         }
 
         for statement in parsed.statements {
             if let Err(e) = self.process_statement(&statement) {
-                if self.options.throw_all_errors {
+                if self.directives.should_suppress_errors() {
+                    continue;
+                } else if self.options.throw_all_errors {
                     self.errors.push(e);
                 } else {
+                    #[cfg(feature = "mutation")]
+                    {
+                        self.current_source_file = previous_source_file;
+                    }
                     return Err(e);
                 }
             }
         }
 
         if !self.errors.is_empty() {
+            #[cfg(feature = "mutation")]
+            {
+                self.current_source_file = previous_source_file;
+            }
             return Err(ConfigError::multiple(std::mem::take(&mut self.errors)));
+        }
+
+        #[cfg(feature = "mutation")]
+        {
+            self.current_source_file = previous_source_file;
         }
 
         Ok(())
@@ -242,22 +344,347 @@ impl Config {
 
     /// Parse a configuration string
     pub fn parse(&mut self, input: &str) -> ParseResult<()> {
-        self.parse_with_path(input, None)
+        self.reset_top_level_state();
+        self.parse_with_path(input, None, true)
     }
 
     /// Parse a single line dynamically (after initial parse)
+    ///
+    /// If a variable is being set, all lines that previously referenced that variable
+    /// will be re-evaluated with the new value (dynamic variable propagation).
+    ///
+    /// Supports bracket syntax for special categories: `special[key]:prop = value`
     pub fn parse_dynamic(&mut self, line: &str) -> ParseResult<()> {
         if !self.options.allow_dynamic_parsing {
             return Err(ConfigError::custom("Dynamic parsing is not enabled"));
         }
 
-        let parsed = HyprlangParser::parse_config(line)?;
-
-        for statement in parsed.statements {
-            self.process_statement(&statement)?;
+        // Handle special category bracket syntax: special[key]:prop = value
+        if let Some(result) = self.try_parse_dynamic_special_category(line)? {
+            return Ok(result);
         }
 
+        let parsed = HyprlangParser::parse_config(line)?;
+        let previous_recording = std::mem::replace(&mut self.record_variable_lines, false);
+
+        let result = (|| {
+            for statement in parsed.statements {
+                // Check if this is a variable definition - we'll need to propagate
+                let var_name = if let Statement::VariableDef { ref name, .. } = statement {
+                    Some(name.clone())
+                } else {
+                    None
+                };
+
+                self.process_statement(&statement)?;
+
+                // If a variable was set, re-evaluate all dependent lines
+                if let Some(name) = var_name {
+                    self.propagate_variable(&name)?;
+                }
+            }
+            Ok(())
+        })();
+
+        self.record_variable_lines = previous_recording;
+        result
+    }
+
+    /// Parse a dynamic assignment with separate key and value arguments.
+    ///
+    /// Equivalent to `parse_dynamic("key = value")`.
+    pub fn parse_dynamic_kv(&mut self, key: &str, value: &str) -> ParseResult<()> {
+        self.parse_dynamic(&format!("{} = {}", key, value))
+    }
+
+    /// Try to handle bracket syntax in dynamic parsing: `special[key]:prop = value`
+    fn try_parse_dynamic_special_category(&mut self, line: &str) -> ParseResult<Option<()>> {
+        // Look for pattern: name[key]:prop = value
+        let Some(bracket_start) = line.find('[') else {
+            return Ok(None);
+        };
+        let Some(bracket_end) = line[bracket_start..].find(']') else {
+            return Ok(None);
+        };
+        let bracket_end = bracket_start + bracket_end;
+
+        // Extract parts
+        let cat_name = line[..bracket_start].trim();
+        let instance_key = &line[bracket_start + 1..bracket_end];
+
+        let rest = &line[bracket_end + 1..];
+        if !rest.starts_with(':') {
+            return Ok(None);
+        }
+        let rest = &rest[1..]; // skip ':'
+
+        let Some(eq_pos) = rest.find('=') else {
+            return Ok(None);
+        };
+        let prop_name = rest[..eq_pos].trim();
+        let raw_value = rest[eq_pos + 1..].trim();
+
+        // Check if this is a registered special category
+        if !self.special_categories.is_registered(cat_name) {
+            return Ok(None);
+        }
+
+        let resolved_value = self.resolve_raw_string(raw_value, true)?;
+        let full_key = format!("{}[{}]:{}", cat_name, instance_key, prop_name);
+        let _ = self.store_special_assignment(
+            cat_name,
+            instance_key,
+            prop_name,
+            &resolved_value,
+            full_key,
+        )?;
+
+        Ok(Some(()))
+    }
+
+    /// Re-evaluate all lines that reference the given variable
+    fn propagate_variable(&mut self, var_name: &str) -> ParseResult<()> {
+        if let Some(lines) = self.variable_lines.get(var_name).cloned() {
+            let previous_recording = std::mem::replace(&mut self.record_variable_lines, false);
+            for var_line in &lines {
+                let saved_path =
+                    std::mem::replace(&mut self.current_path, var_line.category_path.clone());
+                let _ = self.process_statement(&var_line.statement);
+                self.current_path = saved_path;
+            }
+            self.record_variable_lines = previous_recording;
+        }
         Ok(())
+    }
+
+    /// Track which variables are referenced in a value string
+    fn track_variable_references(&mut self, value: &str, statement: &Statement) {
+        if !self.record_variable_lines {
+            return;
+        }
+
+        let var_line = VariableLine {
+            statement: statement.clone(),
+            category_path: self.current_path.clone(),
+        };
+
+        // Extract all variable names referenced in the value
+        let mut chars = value.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '$' {
+                let mut name = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_alphanumeric() || c == '_' {
+                        name.push(c);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if !name.is_empty() {
+                    self.variable_lines
+                        .entry(name)
+                        .or_default()
+                        .push(var_line.clone());
+                }
+            }
+        }
+    }
+
+    fn split_path_segment(segment: &str) -> (String, Option<String>) {
+        if let Some(start) = segment.find('[')
+            && segment.ends_with(']')
+            && start < segment.len() - 1
+        {
+            return (
+                segment[..start].to_string(),
+                Some(segment[start + 1..segment.len() - 1].to_string()),
+            );
+        }
+
+        (segment.to_string(), None)
+    }
+
+    fn plain_current_path(&self) -> Vec<String> {
+        self.current_path
+            .iter()
+            .map(|segment| Self::split_path_segment(segment).0)
+            .collect()
+    }
+
+    fn active_special_context(&self) -> Option<(String, String, Vec<String>)> {
+        let plain_path = self.plain_current_path();
+
+        for idx in (0..self.current_path.len()).rev() {
+            let (_, maybe_key) = Self::split_path_segment(&self.current_path[idx]);
+            let Some(instance_key) = maybe_key else {
+                continue;
+            };
+
+            let category_name = plain_path[..=idx].join(":");
+            if self.special_categories.is_registered(&category_name) {
+                return Some((category_name, instance_key, plain_path[idx + 1..].to_vec()));
+            }
+        }
+
+        None
+    }
+
+    fn resolve_special_assignment(
+        &mut self,
+        key: &[String],
+        resolved_value: &str,
+    ) -> ParseResult<Option<(String, String, String, String)>> {
+        if let Some((category_name, instance_key, nested_path)) = self.active_special_context() {
+            let mut property_segments = nested_path;
+            property_segments.extend(key.iter().cloned());
+            let property_name = property_segments.join(":");
+            let storage_key = format!("{}[{}]:{}", category_name, instance_key, property_name);
+            return Ok(Some((category_name, instance_key, property_name, storage_key)));
+        }
+
+        let plain_path = self.plain_current_path();
+        let mut combined_path = plain_path.clone();
+        combined_path.extend(key.iter().cloned());
+
+        let Some((category_name, prefix_len)) = self
+            .special_categories
+            .find_matching_category_segments(&combined_path)
+        else {
+            return Ok(None);
+        };
+
+        let descriptor = self
+            .special_categories
+            .get_descriptor(&category_name)
+            .cloned()
+            .ok_or_else(|| ConfigError::category_not_found(&category_name, None))?;
+        let property_segments = combined_path[prefix_len..].to_vec();
+        if property_segments.is_empty() {
+            return Ok(None);
+        }
+        let property_name = property_segments.join(":");
+
+        match descriptor.category_type {
+            crate::special_categories::SpecialCategoryType::Static => Ok(Some((
+                category_name.clone(),
+                "static".to_string(),
+                property_name.clone(),
+                format!("{}:{}", category_name, property_name),
+            ))),
+            crate::special_categories::SpecialCategoryType::Keyed => {
+                if plain_path.len() < prefix_len {
+                    return Ok(None);
+                }
+
+                let key_field = descriptor.key_field.clone().ok_or_else(|| {
+                    ConfigError::custom(format!(
+                        "Keyed category '{}' is missing its key field descriptor",
+                        category_name
+                    ))
+                })?;
+
+                let (_, existing_key) = Self::split_path_segment(&self.current_path[prefix_len - 1]);
+                let instance_key = if let Some(existing_key) = existing_key {
+                    existing_key
+                } else {
+                    if property_name != key_field {
+                        return Err(ConfigError::custom(format!(
+                            "special category's first value must be the key. Key for <{}> is <{}>",
+                            category_name, key_field
+                        )));
+                    }
+
+                    let instance_key = resolved_value.to_string();
+                    self.special_categories
+                        .create_instance(&category_name, Some(instance_key.clone()))?;
+                    self.current_path[prefix_len - 1] =
+                        format!("{}[{}]", plain_path[prefix_len - 1], instance_key);
+                    instance_key
+                };
+
+                Ok(Some((
+                    category_name.clone(),
+                    instance_key.clone(),
+                    property_name.clone(),
+                    format!("{}[{}]:{}", category_name, instance_key, property_name),
+                )))
+            }
+            crate::special_categories::SpecialCategoryType::Anonymous => {
+                if plain_path.len() < prefix_len {
+                    return Ok(None);
+                }
+
+                let (_, existing_key) = Self::split_path_segment(&self.current_path[prefix_len - 1]);
+                let instance_key = if let Some(existing_key) = existing_key {
+                    existing_key
+                } else {
+                    let instance_key = self.special_categories.create_instance(&category_name, None)?;
+                    self.current_path[prefix_len - 1] =
+                        format!("{}[{}]", plain_path[prefix_len - 1], instance_key);
+                    instance_key
+                };
+
+                Ok(Some((
+                    category_name.clone(),
+                    instance_key.clone(),
+                    property_name.clone(),
+                    format!("{}[{}]:{}", category_name, instance_key, property_name),
+                )))
+            }
+        }
+    }
+
+    fn store_special_assignment(
+        &mut self,
+        category_name: &str,
+        instance_key: &str,
+        property_name: &str,
+        resolved_value: &str,
+        storage_key: String,
+    ) -> ParseResult<bool> {
+        let descriptor = self
+            .special_categories
+            .get_descriptor(category_name)
+            .cloned()
+            .ok_or_else(|| ConfigError::category_not_found(category_name, None))?;
+
+        let config_value = if descriptor.key_field.as_deref() == Some(property_name) {
+            ConfigValue::String(resolved_value.to_string())
+        } else if let Some(default_value) = descriptor.default_values.get(property_name) {
+            self.parse_value_for_expected_type(resolved_value, default_value)?
+        } else if descriptor.ignore_missing {
+            return Ok(false);
+        } else {
+            return Err(ConfigError::custom(format!(
+                "config option <{}> does not exist.",
+                storage_key
+            )));
+        };
+
+        if !self.options.verify_only {
+            match descriptor.category_type {
+                crate::special_categories::SpecialCategoryType::Static => {
+                    self.special_categories.create_instance(category_name, None)?;
+                }
+                crate::special_categories::SpecialCategoryType::Keyed
+                | crate::special_categories::SpecialCategoryType::Anonymous => {
+                    self.special_categories
+                        .create_instance(category_name, Some(instance_key.to_string()))?;
+                }
+            }
+
+            let entry = ConfigValueEntry::new(config_value, resolved_value.to_string());
+            if let Ok(instance) = self
+                .special_categories
+                .get_instance_mut(category_name, instance_key)
+            {
+                instance.set(property_name.to_string(), entry.clone());
+            }
+            self.values.insert(storage_key, entry);
+        }
+
+        Ok(!self.options.verify_only)
     }
 
     fn process_statement(&mut self, statement: &Statement) -> ParseResult<()> {
@@ -280,10 +707,12 @@ impl Config {
 
         match statement {
             Statement::VariableDef { name, value } => {
-                // Process escapes first, then expand variables
-                // Don't evaluate expressions here - they'll be evaluated when the variable is used
-                let escaped = process_escapes(value);
-                let expanded = self.variables.expand(&escaped)?;
+                let expanded = self.resolve_raw_string_with_restore(value, true, false)?;
+
+                // Track which variables this definition references (for propagation)
+                if value.contains('$') {
+                    self.track_variable_references(value, statement);
+                }
 
                 // Track variable origin in multi_document
                 #[cfg(feature = "mutation")]
@@ -293,44 +722,65 @@ impl Config {
                     multi_doc.register_key(format!("${}", name), source_file.clone());
                 }
 
-                self.variables.set(name.clone(), expanded.clone());
+                if !self.options.verify_only {
+                    self.variables.set(name.clone(), expanded.clone());
 
-                // Update expression evaluator if it's a number
-                if let Ok(num) = ConfigValue::parse_int(&expanded) {
-                    self.expressions.set_variable(name.clone(), num);
+                    // Update expression evaluator if it's a number
+                    if let Ok(num) = ConfigValue::parse_int(&expanded) {
+                        self.expressions.set_variable(name.clone(), num);
+                    }
                 }
 
                 Ok(())
             }
 
             Statement::Assignment { key, value } => {
-                // Check if we're inside a special category block
-                // Special category paths contain brackets like "windowrule[test]"
-                let in_special_category = self.current_path.iter().any(|p| p.contains('['));
+                // Track variable references for dynamic propagation
+                let value_str = self.value_to_string(value);
+                if value_str.contains('$') {
+                    self.track_variable_references(&value_str, statement);
+                }
 
-                // Check if this is a potential handler call (single identifier and registered handler)
-                // But NOT if we're inside a special category (properties there should be assignments)
-                let is_potential_handler = key.len() == 1 && !in_special_category;
-                let keyword = &key[0];
+                let resolved_value = self.resolve_value_to_string(value)?;
 
-                if is_potential_handler && self.handlers.has_handler(&self.current_path, keyword) {
+                if let Some((category_name, instance_key, property_name, storage_key)) =
+                    self.resolve_special_assignment(key, &resolved_value)?
+                {
+                    let _stored = self.store_special_assignment(
+                        &category_name,
+                        &instance_key,
+                        &property_name,
+                        &resolved_value,
+                        storage_key.clone(),
+                    )?;
+
+                    #[cfg(feature = "mutation")]
+                    if _stored
+                        && let (Some(multi_doc), Some(source_file)) =
+                            (&mut self.multi_document, &self.current_source_file)
+                    {
+                        multi_doc.register_key(storage_key.clone(), source_file.clone());
+                    }
+                } else if key.len() == 1
+                    && let Some(resolved_handler) =
+                        self.handlers.resolve_invocation(&self.current_path, &key[0])
+                {
                     // Treat as handler call
-                    let expanded_value = match value {
-                        Value::String(s) => self.variables.expand(s)?,
-                        _ => self.value_to_string(value),
-                    };
-
                     // Create full key including category path for handler calls
                     let full_key = if self.current_path.is_empty() {
-                        keyword.clone()
+                        resolved_handler.handler_keyword.clone()
                     } else {
-                        format!("{}:{}", self.current_path.join(":"), keyword)
+                        format!(
+                            "{}:{}",
+                            self.current_path.join(":"),
+                            resolved_handler.handler_keyword
+                        )
                     };
 
                     self.handler_calls
                         .entry(full_key.clone())
                         .or_default()
-                        .push(expanded_value.clone());
+                        .push(resolved_value.clone());
 
                     // Track handler origin in multi_document
                     #[cfg(feature = "mutation")]
@@ -341,23 +791,26 @@ impl Config {
                     }
 
                     self.handlers
-                        .execute(&self.current_path, keyword, &expanded_value, None)?;
+                        .execute_resolved(&self.current_path, &resolved_handler, &resolved_value)?;
                 } else {
                     // Regular assignment
                     let full_key = self.make_full_key(key);
                     let config_value = self.parse_config_value(value)?;
-                    let raw = self.value_to_string(value);
 
-                    // Track key origin in multi_document
-                    #[cfg(feature = "mutation")]
-                    if let (Some(multi_doc), Some(source_file)) =
-                        (&mut self.multi_document, &self.current_source_file)
-                    {
-                        multi_doc.register_key(full_key.clone(), source_file.clone());
+                    if !self.options.verify_only {
+                        let raw = self.value_to_string(value);
+
+                        // Track key origin in multi_document
+                        #[cfg(feature = "mutation")]
+                        if let (Some(multi_doc), Some(source_file)) =
+                            (&mut self.multi_document, &self.current_source_file)
+                        {
+                            multi_doc.register_key(full_key.clone(), source_file.clone());
+                        }
+
+                        self.values
+                            .insert(full_key, ConfigValueEntry::new(config_value, raw));
                     }
-
-                    self.values
-                        .insert(full_key, ConfigValueEntry::new(config_value, raw));
                 }
 
                 Ok(())
@@ -386,31 +839,31 @@ impl Config {
                 key,
                 statements,
             } => {
-                // If category is not registered as special and has no key, treat as regular category
-                if !self.special_categories.is_registered(name) {
-                    if key.is_none() {
-                        // Fall back to regular category block behavior
-                        self.current_path.push(name.clone());
+                if key.is_none() {
+                    self.current_path.push(name.clone());
 
-                        for stmt in statements {
-                            if let Err(e) = self.process_statement(stmt) {
-                                if self.options.throw_all_errors {
-                                    self.errors.push(e);
-                                } else {
-                                    self.current_path.pop();
-                                    return Err(e);
-                                }
+                    for stmt in statements {
+                        if let Err(e) = self.process_statement(stmt) {
+                            if self.options.throw_all_errors {
+                                self.errors.push(e);
+                            } else {
+                                self.current_path.pop();
+                                return Err(e);
                             }
                         }
-
-                        self.current_path.pop();
-                        return Ok(());
                     }
+
+                    self.current_path.pop();
+                    return Ok(());
+                }
+
+                if !self.special_categories.is_registered(name) {
                     return Err(ConfigError::category_not_found(name, None));
                 }
 
-                // Create the instance with the provided key (or auto-generate if none)
-                let instance_key = self.special_categories.create_instance(name, key.clone())?;
+                let instance_key = self
+                    .special_categories
+                    .create_instance(name, key.clone())?;
 
                 self.current_path
                     .push(format!("{}[{}]", name, instance_key));
@@ -427,21 +880,6 @@ impl Config {
                     }
                 }
 
-                // Store values in the special category instance
-                let full_path = self.current_path.last().unwrap();
-                for (key, value) in &self.values {
-                    if key.starts_with(full_path) {
-                        let sub_key = key.strip_prefix(full_path).unwrap().trim_start_matches(':');
-
-                        if let Ok(instance) = self
-                            .special_categories
-                            .get_instance_mut(name, &instance_key)
-                        {
-                            instance.set(sub_key.to_string(), value.clone());
-                        }
-                    }
-                }
-
                 self.current_path.pop();
                 Ok(())
             }
@@ -451,7 +889,7 @@ impl Config {
                 flags,
                 value,
             } => {
-                let expanded_value = self.variables.expand(value)?;
+                let expanded_value = self.resolve_raw_string(value, true)?;
 
                 // Store the handler call value only if it's registered or at root level
                 let should_store = self.handlers.has_handler(&self.current_path, keyword)
@@ -501,7 +939,7 @@ impl Config {
                     .unwrap_or_else(|_| resolved.clone());
 
                 // Parse the sourced file using internal method (avoids re-initializing multi_document)
-                let result = self.parse_file_internal(&canonical_resolved);
+                let result = self.parse_file_internal(&canonical_resolved, false);
 
                 // End load
                 if let Some(resolver) = &mut self.source_resolver {
@@ -517,6 +955,102 @@ impl Config {
             } => {
                 self.directives
                     .process_directive(directive_type, args.as_deref(), &self.variables)
+            }
+        }
+    }
+
+    fn resolve_raw_string_with_restore(
+        &mut self,
+        raw: &str,
+        evaluate_expressions: bool,
+        restore_escaped: bool,
+    ) -> ParseResult<String> {
+        let escaped = process_escapes(raw);
+        let expanded = self.variables.expand(&escaped)?;
+        let with_exprs = if evaluate_expressions {
+            self.evaluate_expressions_in_string(&expanded)?
+        } else {
+            expanded
+        };
+
+        if restore_escaped {
+            Ok(restore_escaped_braces(&with_exprs))
+        } else {
+            Ok(with_exprs)
+        }
+    }
+
+    fn resolve_raw_string(&mut self, raw: &str, evaluate_expressions: bool) -> ParseResult<String> {
+        self.resolve_raw_string_with_restore(raw, evaluate_expressions, true)
+    }
+
+    fn resolve_value_to_string(&mut self, value: &Value) -> ParseResult<String> {
+        match value {
+            Value::Expression(expr) => Ok(self.expressions.evaluate(expr)?.to_string()),
+            Value::Variable(name) => self.variables.expand(&format!("${}", name)),
+            Value::Color(color) => Ok(color.to_string()),
+            Value::Vec2(vec) => Ok(vec.to_string()),
+            Value::Number(num) => Ok(num.clone()),
+            Value::Boolean(b) => Ok(if *b { "true" } else { "false" }.to_string()),
+            Value::String(s) => self.resolve_raw_string(s, true),
+            Value::Multiline(lines) => {
+                let joined = MultilineProcessor::join_lines(lines);
+                self.resolve_raw_string(&joined, true)
+            }
+        }
+    }
+
+    fn parse_int_value(&self, s: &str) -> ParseResult<ConfigValue> {
+        if let Ok(b) = ConfigValue::parse_bool(s) {
+            return Ok(ConfigValue::Int(if b { 1 } else { 0 }));
+        }
+
+        if s.starts_with("rgba(") && s.ends_with(')') {
+            return self
+                .parse_rgba_string(s)
+                .map(|color| ConfigValue::Int(color.to_argb() as i64));
+        }
+
+        if s.starts_with("rgb(") && s.ends_with(')') {
+            return self
+                .parse_rgb_string(s)
+                .map(|color| ConfigValue::Int(color.to_argb() as i64));
+        }
+
+        Ok(ConfigValue::Int(ConfigValue::parse_int(s)?))
+    }
+
+    fn parse_value_for_expected_type(
+        &mut self,
+        resolved_value: &str,
+        expected: &ConfigValue,
+    ) -> ParseResult<ConfigValue> {
+        match expected {
+            ConfigValue::Int(_) => self.parse_int_value(resolved_value),
+            ConfigValue::Float(_) => Ok(ConfigValue::Float(ConfigValue::parse_float(
+                resolved_value,
+            )?)),
+            ConfigValue::String(_) => Ok(ConfigValue::String(resolved_value.to_string())),
+            ConfigValue::Vec2(_) => Ok(ConfigValue::Vec2(self.parse_vec2_string(resolved_value)?)),
+            ConfigValue::Color(_) => {
+                if resolved_value.starts_with("rgba(") && resolved_value.ends_with(')') {
+                    return Ok(ConfigValue::Color(self.parse_rgba_string(resolved_value)?));
+                }
+                if resolved_value.starts_with("rgb(") && resolved_value.ends_with(')') {
+                    return Ok(ConfigValue::Color(self.parse_rgb_string(resolved_value)?));
+                }
+                Ok(ConfigValue::Color(Color::from_hex(resolved_value)?))
+            }
+            ConfigValue::Custom { type_name, .. } => {
+                let handler = self
+                    .custom_types
+                    .get(type_name)
+                    .ok_or_else(|| ConfigError::custom(format!("Unknown custom type '{}'", type_name)))?;
+                let value = handler.parse(resolved_value)?;
+                Ok(ConfigValue::Custom {
+                    type_name: type_name.clone(),
+                    value: Rc::from(value),
+                })
             }
         }
     }
@@ -552,26 +1086,13 @@ impl Config {
             Value::Boolean(b) => Ok(ConfigValue::Int(if *b { 1 } else { 0 })),
 
             Value::String(s) => {
-                // Process escapes first (converts escaped braces to placeholders)
-                let escaped = process_escapes(s);
-                // Expand variables
-                let expanded = self.variables.expand(&escaped)?;
-                // Evaluate expressions (placeholders won't be evaluated)
-                let with_exprs = self.evaluate_expressions_in_string(&expanded)?;
-                // Restore escaped braces from placeholders to literal {{}}
-                let final_value = restore_escaped_braces(&with_exprs);
-                self.parse_string_value(&final_value)
+                let resolved = self.resolve_raw_string(s, true)?;
+                self.parse_string_value(&resolved)
             }
 
             Value::Multiline(lines) => {
                 let joined = MultilineProcessor::join_lines(lines);
-                // Process escapes before variable expansion
-                let escaped = process_escapes(&joined);
-                let expanded = self.variables.expand(&escaped)?;
-                // Evaluate expressions
-                let with_exprs = self.evaluate_expressions_in_string(&expanded)?;
-                // Restore escaped braces
-                let final_value = restore_escaped_braces(&with_exprs);
+                let final_value = self.resolve_raw_string(&joined, true)?;
                 Ok(ConfigValue::String(final_value))
             }
         }
@@ -774,6 +1295,21 @@ impl Config {
         }
     }
 
+    /// Change the root path for resolving source directives.
+    ///
+    /// This updates the base directory used for resolving relative paths in
+    /// `source = path` directives. Useful when re-parsing from a different location.
+    pub fn change_root_path(&mut self, path: &Path) {
+        let base_dir = if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent().unwrap_or(path).to_path_buf()
+        };
+
+        self.options.base_dir = Some(base_dir.clone());
+        self.source_resolver = Some(SourceResolver::new(base_dir));
+    }
+
     /// Get a configuration value
     pub fn get(&self, key: &str) -> ParseResult<&ConfigValue> {
         self.values
@@ -870,6 +1406,20 @@ impl Config {
             .register_global(keyword.clone(), FunctionHandler::new(keyword, handler));
     }
 
+    /// Unregister a previously registered handler by keyword.
+    ///
+    /// Returns `true` if the handler was found and removed.
+    pub fn unregister_handler(&mut self, keyword: &str) -> bool {
+        self.handlers.unregister_global(keyword)
+    }
+
+    /// Unregister a category-specific handler.
+    ///
+    /// Returns `true` if the handler was found and removed.
+    pub fn unregister_category_handler(&mut self, category: &str, keyword: &str) -> bool {
+        self.handlers.unregister_category(category, keyword)
+    }
+
     /// Register a category-specific handler
     pub fn register_category_handler<H>(
         &mut self,
@@ -915,12 +1465,24 @@ impl Config {
     ) {
         let category = category.into();
         let property = property.into();
+        let _ = self
+            .special_categories
+            .add_default_value(&category, property, default_value);
+    }
 
-        // Get the descriptor, add the default value, and re-register
-        if let Some(mut descriptor) = self.special_categories.get_descriptor(&category).cloned() {
-            descriptor.default_values.insert(property, default_value);
-            self.special_categories.register(descriptor);
-        }
+    /// Remove a default value from a special category and all instantiated categories.
+    pub fn remove_special_category_value(
+        &mut self,
+        category: &str,
+        property: &str,
+    ) -> ParseResult<()> {
+        self.special_categories
+            .remove_default_value(category, property)
+    }
+
+    /// Remove a registered special category and all of its instances.
+    pub fn remove_special_category(&mut self, category: &str) {
+        self.special_categories.remove_category(category);
     }
 
     /// Get a special category instance
@@ -937,6 +1499,11 @@ impl Config {
         }
 
         Ok(result)
+    }
+
+    /// Check if a special category instance exists for a given key.
+    pub fn special_category_exists_for_key(&self, category: &str, key: &str) -> bool {
+        self.special_categories.instance_exists(category, key)
     }
 
     /// List all keys for a special category
@@ -1386,6 +1953,7 @@ impl Config {
     ///
     /// let mut config = Config::new();
     /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
     /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
     ///
     /// // Get mutable reference and modify
@@ -1427,10 +1995,12 @@ impl Config {
     ///
     /// ```
     /// # #[cfg(feature = "mutation")] {
-    /// use hyprlang::{Config, SpecialCategoryDescriptor};
+    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
     ///
     /// let mut config = Config::new();
     /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
+    /// config.register_special_category_value("device", "repeat_rate", ConfigValue::Int(0));
     /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}\ndevice[keyboard] {\n  repeat_rate = 50\n}").unwrap();
     ///
     /// config.remove_special_category_instance("device", "mouse").unwrap();

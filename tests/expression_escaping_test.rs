@@ -46,7 +46,7 @@ fn test_mixed_escaped_and_eval() {
     // First expression evaluates, second is literal
     assert_eq!(
         config.get_string("testValue").unwrap(),
-        "-2 and {{literal}}"
+        "\"-2 and {{literal}}\""
     );
 }
 
@@ -76,7 +76,7 @@ fn test_complex_mixed_escapes() {
     // First expression evaluates, escaped part stays literal
     assert_eq!(
         config.get_string("testValue").unwrap(),
-        "-2 {{ literal }} more"
+        "\"-2 {{ literal }} more\""
     );
 }
 
@@ -141,16 +141,16 @@ fn test_config_file_escapes() {
 
     assert_eq!(
         config.get_string("testEscapedExpr").unwrap(),
-        "{{testInt + 7}}"
+        "\"{{testInt + 7}}\""
     );
     assert_eq!(
         config.get_string("testEscapedExpr2").unwrap(),
-        "{{testInt + 7}}"
+        "\"{{testInt + 7}}\""
     );
-    assert_eq!(config.get_string("testEscapedExpr3").unwrap(), "{{3 + 8}}");
-    assert_eq!(config.get_string("testEscapedEscape").unwrap(), r"\5");
+    assert_eq!(config.get_string("testEscapedExpr3").unwrap(), "\"{{3 + 8}}\"");
+    assert_eq!(config.get_string("testEscapedEscape").unwrap(), r#""\5""#);
     assert_eq!(
         config.get_string("testSimpleMix").unwrap(),
-        "-2 and {{ literal }}"
+        "\"-2 and {{ literal }}\""
     );
 }

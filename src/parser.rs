@@ -259,13 +259,12 @@ impl HyprlangParser {
 
             Rule::string_value => {
                 let s = pair.as_str();
-                // Remove quotes if present
-                let s = if s.starts_with('"') && s.ends_with('"') {
-                    &s[1..s.len() - 1]
+                if s.starts_with('"') && s.ends_with('"') {
+                    Ok(Value::String(s.to_string()))
                 } else {
-                    s
-                };
-                Ok(Value::String(s.to_string()))
+                    // Unquoted: unescape ## -> # (comment escaping)
+                    Ok(Value::String(s.replace("##", "#")))
+                }
             }
 
             _ => Ok(Value::String(pair.as_str().to_string())),

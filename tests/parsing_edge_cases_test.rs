@@ -1,4 +1,4 @@
-//! Edge case tests for parsing color and Vec2 values.
+//! Edge case tests for parsing color, Vec2, and comment values.
 
 use hyprlang::Config;
 
@@ -124,16 +124,34 @@ fn test_vec2_whitespace_variations() {
     let mut config = Config::new();
 
     // Various whitespace
-    config.parse("size1 = 100,200").unwrap();
-    config.parse("size2 = 100, 200").unwrap();
-    config.parse("size3 = 100 , 200").unwrap();
-    config.parse("size4 =   100  ,  200  ").unwrap();
+    config
+        .parse(
+            r#"
+            size1 = 100,200
+            size2 = 100, 200
+            size3 = 100 , 200
+            size4 =   100  ,  200
+        "#,
+        )
+        .unwrap();
 
     // All should parse as valid vec2
     assert!(config.get_vec2("size1").is_ok());
     assert!(config.get_vec2("size2").is_ok());
     assert!(config.get_vec2("size3").is_ok());
     assert!(config.get_vec2("size4").is_ok());
+}
+
+#[test]
+fn test_top_level_parse_resets_state() {
+    let mut config = Config::new();
+
+    config.parse("first = 1").unwrap();
+    assert_eq!(config.get_int("first").unwrap(), 1);
+
+    config.parse("second = 2").unwrap();
+    assert!(config.get("first").is_err());
+    assert_eq!(config.get_int("second").unwrap(), 2);
 }
 
 #[test]
@@ -173,6 +191,85 @@ fn test_vec2_extra_components_ignored() {
     let value = config.get("size").unwrap();
     // Behavior depends on implementation
     let _ = value.as_vec2();
+}
+
+// ========== COMMENT ESCAPING EDGE CASES ==========
+
+#[test]
+fn test_comment_escape_basic() {
+    let mut config = Config::new();
+    config
+        .parse("testString = Hello World! ## This is not a comment! # This is!")
+        .unwrap();
+    assert_eq!(
+        config.get_string("testString").unwrap(),
+        "Hello World! # This is not a comment!"
+    );
+}
+
+#[test]
+fn test_comment_escape_double_hash_only() {
+    let mut config = Config::new();
+    config.parse("key = value ## text").unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "value # text");
+}
+
+#[test]
+fn test_comment_escape_multiple_double_hashes() {
+    let mut config = Config::new();
+    config.parse("key = a ## b ## c").unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "a # b # c");
+}
+
+#[test]
+fn test_comment_escape_quadruple_hash() {
+    let mut config = Config::new();
+    config.parse("key = value ####").unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "value ##");
+}
+
+#[test]
+fn test_comment_escape_triple_hash() {
+    // ### = ## (escaped) + # (comment start) -> value is single #
+    let mut config = Config::new();
+    config.parse("key = value ###").unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "value #");
+}
+
+#[test]
+fn test_comment_escape_no_hash() {
+    let mut config = Config::new();
+    config.parse("key = normal value").unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "normal value");
+}
+
+#[test]
+fn test_comment_escape_single_hash_comment() {
+    let mut config = Config::new();
+    config.parse("key = value # comment").unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "value");
+}
+
+#[test]
+fn test_comment_escape_in_quoted_string() {
+    // ## inside quotes should be preserved as-is
+    let mut config = Config::new();
+    config.parse(r#"key = "value ## text""#).unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "\"value ## text\"");
+}
+
+#[test]
+fn test_comment_escape_with_variable() {
+    let mut config = Config::new();
+    config
+        .parse(
+            r#"
+        $VAR = world
+        key = hello $VAR ## escaped
+    "#,
+        )
+        .unwrap();
+    assert_eq!(config.get_string("key").unwrap(), "hello world # escaped");
 }
 
 // ========== GENERAL PARSING EDGE CASES ==========

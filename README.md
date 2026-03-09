@@ -17,6 +17,7 @@ This project is not endorsed by or affiliated with the Hyprland project/HyprWM O
 Parity:
 - For Hyprland < 0.53.0, use hyprlang-rs v0.3.x
 - For Hyprland >= 0.53.0, use hyprlang-rs v0.4.x
+- For Hyprlang 0.6.8 parity, use hyprlang-rs v0.5.x
 
 ## Features
 
@@ -35,7 +36,9 @@ Parity:
 - 🔄 **Mutation & Serialization** - Modify config values and save back to files (optional)
 - 📁 **Multi-File Mutation Tracking** - Track and save changes to the correct source file when using `source` directives
 - 🎯 **Windowrule v3 / Layerrule v2** - Full support for new special category syntax with 85+ registered properties
-- ✅ **Fully Tested** - 207 tests covering all features
+- 🔀 **Comment Escaping** - `##` in values produces a literal `#` character
+- 🔁 **Dynamic Variable Propagation** - Dynamically updated variables automatically re-evaluate dependent lines
+- ✅ **Fully Tested** - 241 tests covering all features
 
 ## Benchmarks
 
@@ -51,7 +54,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hyprlang = "0.4.1"
+hyprlang = "0.5.0"
 ```
 
 ### Optional Features
@@ -576,7 +579,7 @@ assert_eq!(anims.len(), 2);
 ### Special Categories
 
 ```rust
-use hyprlang::{Config, SpecialCategoryDescriptor};
+use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
 
 let mut config = Config::new();
 
@@ -584,6 +587,14 @@ let mut config = Config::new();
 config.register_special_category(
     SpecialCategoryDescriptor::keyed("device", "name")
 );
+config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
+config.register_special_category_value(
+    "device",
+    "accel_profile",
+    ConfigValue::String(String::new()),
+);
+config.register_special_category_value("device", "repeat_rate", ConfigValue::Int(0));
+config.register_special_category_value("device", "repeat_delay", ConfigValue::Int(0));
 
 config.parse(r#"
     device[mouse] {
@@ -945,6 +956,15 @@ options.allow_dynamic_parsing = true;
 // Base directory for resolving source directives
 options.base_dir = Some(PathBuf::from("/path/to/config"));
 
+// Parse without storing values (dry-run validation)
+options.verify_only = false;
+
+// Don't error on missing config file
+options.allow_missing_config = false;
+
+// Treat path argument as raw config content instead of a file path
+options.path_is_stream = false;
+
 let config = Config::with_options(options);
 ```
 
@@ -969,6 +989,7 @@ let config = Config::with_options(options);
 // Parsing
 config.parse(content: &str) -> Result<()>
 config.parse_file(path: &Path) -> Result<()>
+config.parse_dynamic(line: &str) -> Result<()>
 
 // Getting values
 config.get(key: &str) -> Result<&ConfigValue>
@@ -981,6 +1002,7 @@ config.get_color(key: &str) -> Result<Color>
 // Setting values
 config.set(key: impl Into<String>, value: ConfigValue)
 config.set_variable(name: String, value: String)
+config.change_root_path(path: &Path)
 
 // Mutation (requires `mutation` feature)
 config.set_int(key, value: i64)
@@ -1013,12 +1035,15 @@ config.has(key: &str) -> bool
 // Handlers
 config.register_handler_fn(keyword, handler_fn)
 config.register_category_handler_fn(category, keyword, handler_fn)
+config.unregister_handler(keyword: &str) -> bool
+config.unregister_category_handler(category: &str, keyword: &str) -> bool
 config.get_handler_calls(handler: &str) -> Option<&Vec<String>>
 config.all_handler_calls() -> &HashMap<String, Vec<String>>
 
 // Special categories
 config.register_special_category(descriptor)
 config.get_special_category(category: &str, key: &str) -> Result<HashMap<String, &ConfigValue>>
+config.special_category_exists_for_key(category: &str, key: &str) -> bool
 ```
 
 ## Examples
@@ -1090,16 +1115,18 @@ cargo test
 cargo test --all-features
 ```
 
-The project includes **177 tests** with 100% pass rate:
-- 52 unit tests covering core functionality
+The project includes **241 tests** with 100% pass rate:
+- 56 unit tests covering core functionality
 - 11 conditional directive tests
 - 11 expression escaping tests
-- 15 windowrule v3 / layerrule v2 tests
+- 21 windowrule v3 / layerrule v2 tests
 - 12 Hyprland config tests
+- 15 Hyprland parity tests
 - 10 mutation & round-trip serialization tests
 - 6 multi-file mutation tests
 - 19 parsing edge case tests
-- 41 documentation tests
+- 30 Hyprlang 0.6.8 parity tests
+- 50 documentation tests
 
 All tests from the original Hyprlang C++ implementation have been ported and pass successfully, plus additional tests for new features like expression escaping, negated conditionals, windowrule v3 syntax, and comprehensive edge case coverage.
 
@@ -1108,7 +1135,7 @@ All tests from the original Hyprlang C++ implementation have been ported and pas
 The parser is implemented using [pest](https://pest.rs/) with a PEG grammar. The grammar file is located at `src/hyprlang.pest`.
 
 Key syntax features:
-- Comments: `#` for single-line, `##` for documentation
+- Comments: `#` for single-line, `##` for literal `#` in values
 - Variables: `$VAR = value`, `$env:PATH` (environment variables)
 - Expressions: `{{expr}}` with arithmetic operators (+, -, *, /)
 - Expression escaping: `\{{}}` or `{\{}}` for literal braces
