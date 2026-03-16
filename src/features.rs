@@ -134,6 +134,19 @@ impl SourceResolver {
 
     /// Resolve a source path relative to the base directory
     pub fn resolve_path(&self, path: &str) -> ParseResult<PathBuf> {
+        // Expand ~ to home directory
+        let expanded;
+        let path = if let Some(rest) = path.strip_prefix("~/") {
+            if let Ok(home) = std::env::var("HOME") {
+                expanded = format!("{}/{}", home, rest);
+                expanded.as_str()
+            } else {
+                path
+            }
+        } else {
+            path
+        };
+
         let path_obj = Path::new(path);
 
         let resolved = if path_obj.is_absolute() {
