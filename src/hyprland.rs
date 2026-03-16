@@ -406,6 +406,64 @@ impl<'a> RuleInstance<'a> {
         Self { values }
     }
 
+    fn parse_color_string(key: &str, value: &str) -> ParseResult<Color> {
+        if value.starts_with("rgba(") && value.ends_with(')') {
+            let inner = &value[5..value.len() - 1];
+            if !inner.contains(',') {
+                return Color::from_hex(inner);
+            }
+
+            let parts: Vec<&str> = inner.split(',').map(|part| part.trim()).collect();
+            if parts.len() != 4 {
+                return Err(ConfigError::invalid_color(value, "rgba needs 4 components"));
+            }
+
+            let r = parts[0]
+                .parse::<u8>()
+                .map_err(|_| ConfigError::invalid_color(value, "invalid r"))?;
+            let g = parts[1]
+                .parse::<u8>()
+                .map_err(|_| ConfigError::invalid_color(value, "invalid g"))?;
+            let b = parts[2]
+                .parse::<u8>()
+                .map_err(|_| ConfigError::invalid_color(value, "invalid b"))?;
+            let a = if parts[3].contains('.') {
+                let alpha = parts[3]
+                    .parse::<f64>()
+                    .map_err(|_| ConfigError::invalid_color(value, "invalid a"))?;
+                (alpha * 255.0).round() as u8
+            } else {
+                parts[3]
+                    .parse::<u8>()
+                    .map_err(|_| ConfigError::invalid_color(value, "invalid a"))?
+            };
+
+            return Ok(Color::from_rgba(r, g, b, a));
+        }
+
+        if value.starts_with("rgb(") && value.ends_with(')') {
+            let inner = &value[4..value.len() - 1];
+            let parts: Vec<&str> = inner.split(',').map(|part| part.trim()).collect();
+            if parts.len() != 3 {
+                return Err(ConfigError::invalid_color(value, "rgb needs 3 components"));
+            }
+
+            let r = parts[0]
+                .parse::<u8>()
+                .map_err(|_| ConfigError::invalid_color(value, "invalid r"))?;
+            let g = parts[1]
+                .parse::<u8>()
+                .map_err(|_| ConfigError::invalid_color(value, "invalid g"))?;
+            let b = parts[2]
+                .parse::<u8>()
+                .map_err(|_| ConfigError::invalid_color(value, "invalid b"))?;
+
+            return Ok(Color::from_rgb(r, g, b));
+        }
+
+        Color::from_hex(value).map_err(|_| ConfigError::type_error(key, "Color", "String"))
+    }
+
     /// Get a value by key
     pub fn get(&self, key: &str) -> ParseResult<&ConfigValue> {
         self.values
@@ -426,6 +484,10 @@ impl<'a> RuleInstance<'a> {
     pub fn get_int(&self, key: &str) -> ParseResult<i64> {
         match self.get(key)? {
             ConfigValue::Int(i) => Ok(*i),
+            ConfigValue::String(s) => ConfigValue::parse_bool(s)
+                .map(|b| if b { 1 } else { 0 })
+                .or_else(|_| ConfigValue::parse_int(s))
+                .map_err(|_| ConfigError::type_error(key, "Int", "String")),
             v => Err(ConfigError::type_error(key, "Int", v.type_name())),
         }
     }
@@ -434,6 +496,10 @@ impl<'a> RuleInstance<'a> {
     pub fn get_float(&self, key: &str) -> ParseResult<f64> {
         match self.get(key)? {
             ConfigValue::Float(f) => Ok(*f),
+            ConfigValue::Int(i) => Ok(*i as f64),
+            ConfigValue::String(s) => ConfigValue::parse_float(s)
+                .or_else(|_| ConfigValue::parse_int(s).map(|i| i as f64))
+                .map_err(|_| ConfigError::type_error(key, "Float", "String")),
             v => Err(ConfigError::type_error(key, "Float", v.type_name())),
         }
     }
@@ -442,6 +508,7 @@ impl<'a> RuleInstance<'a> {
     pub fn get_color(&self, key: &str) -> ParseResult<Color> {
         match self.get(key)? {
             ConfigValue::Color(c) => Ok(*c),
+            ConfigValue::String(s) => Self::parse_color_string(key, s),
             v => Err(ConfigError::type_error(key, "Color", v.type_name())),
         }
     }
@@ -552,10 +619,16 @@ impl Hyprland {
     /// Register all Hyprland-specific special categories
     fn register_all_special_categories(config: &mut Config) {
         // Device is a keyed category: device[name] { ... }
-        config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+        config.register_special_category(
+            SpecialCategoryDescriptor::keyed("device", "name").with_ignore_missing(),
+        );
+        config.register_special_category_value("device", "enabled", ConfigValue::Int(0));
+        config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
 
         // Monitor is a keyed category: monitor[name] { ... } (for per-monitor settings)
-        config.register_special_category(SpecialCategoryDescriptor::keyed("monitor", "name"));
+        config.register_special_category(
+            SpecialCategoryDescriptor::keyed("monitor", "name").with_ignore_missing(),
+        );
 
         // Windowrule v3: windowrule { name = ... }
         config.register_special_category(SpecialCategoryDescriptor::keyed("windowrule", "name"));

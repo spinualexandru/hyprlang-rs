@@ -38,6 +38,7 @@
 //!
 //! let mut config = Config::new();
 //! config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+//! config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
 //! config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
 //!
 //! let mut mouse = config.get_special_category_mut("device", "mouse").unwrap();
@@ -183,6 +184,12 @@ impl<'a> MutableVariable<'a> {
 ///
 /// let mut config = Config::new();
 /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+/// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
+/// config.register_special_category_value(
+///     "device",
+///     "accel_profile",
+///     ConfigValue::String(String::new()),
+/// );
 /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
 ///
 /// let mut mouse = config.get_special_category_mut("device", "mouse").unwrap();
@@ -219,10 +226,11 @@ impl<'a> MutableCategoryInstance<'a> {
     ///
     /// ```
     /// # #[cfg(feature = "mutation")] {
-    /// use hyprlang::{Config, SpecialCategoryDescriptor};
+    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
     ///
     /// let mut config = Config::new();
     /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
     /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
     ///
     /// let mouse = config.get_special_category_mut("device", "mouse").unwrap();
@@ -246,11 +254,17 @@ impl<'a> MutableCategoryInstance<'a> {
     ///
     /// ```
     /// # #[cfg(feature = "mutation")] {
-    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
-    ///
-    /// let mut config = Config::new();
-    /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
-    /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
+/// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
+///
+/// let mut config = Config::new();
+/// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+/// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
+/// config.register_special_category_value(
+///     "device",
+///     "accel_profile",
+///     ConfigValue::String(String::new()),
+/// );
+/// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
     ///
     /// let mut mouse = config.get_special_category_mut("device", "mouse").unwrap();
     /// mouse.set("sensitivity", ConfigValue::Float(2.5)).unwrap();
@@ -278,11 +292,17 @@ impl<'a> MutableCategoryInstance<'a> {
     ///
     /// ```
     /// # #[cfg(feature = "mutation")] {
-    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
-    ///
-    /// let mut config = Config::new();
-    /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
-    /// config.parse("device[mouse] {\n  sensitivity = 1.0\n  accel_profile = flat\n}").unwrap();
+/// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
+///
+/// let mut config = Config::new();
+/// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+/// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
+/// config.register_special_category_value(
+///     "device",
+///     "accel_profile",
+///     ConfigValue::String(String::new()),
+/// );
+/// config.parse("device[mouse] {\n  sensitivity = 1.0\n  accel_profile = flat\n}").unwrap();
     ///
     /// let mut mouse = config.get_special_category_mut("device", "mouse").unwrap();
     /// let removed = mouse.remove("accel_profile").unwrap();
@@ -307,10 +327,11 @@ impl<'a> MutableCategoryInstance<'a> {
     ///
     /// ```
     /// # #[cfg(feature = "mutation")] {
-    /// use hyprlang::{Config, SpecialCategoryDescriptor};
+    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
     ///
     /// let mut config = Config::new();
     /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
     /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
     ///
     /// let mouse = config.get_special_category_mut("device", "mouse").unwrap();
@@ -327,10 +348,11 @@ impl<'a> MutableCategoryInstance<'a> {
     ///
     /// ```
     /// # #[cfg(feature = "mutation")] {
-    /// use hyprlang::{Config, SpecialCategoryDescriptor};
+    /// use hyprlang::{Config, ConfigValue, SpecialCategoryDescriptor};
     ///
     /// let mut config = Config::new();
     /// config.register_special_category(SpecialCategoryDescriptor::keyed("device", "name"));
+    /// config.register_special_category_value("device", "sensitivity", ConfigValue::Float(0.0));
     /// config.parse("device[mouse] {\n  sensitivity = 1.0\n}").unwrap();
     ///
     /// let mouse = config.get_special_category_mut("device", "mouse").unwrap();

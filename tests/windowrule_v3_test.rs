@@ -195,6 +195,30 @@ fn test_mixed_v2_and_v3_syntax() {
 }
 
 #[test]
+fn test_windowrule_bracketless_syntax() {
+    let mut hypr = Hyprland::new();
+
+    // Bracketless syntax: key resolved from `name = ...` inside the block
+    hypr.parse(
+        r#"
+        windowrule {
+            name = magnifier
+            match:title = ^(Magnifier)$
+            float = yes
+        }
+    "#,
+    )
+    .unwrap();
+
+    let names = hypr.windowrule_names();
+    assert!(names.contains(&"magnifier".to_string()));
+
+    let rule = hypr.get_windowrule("magnifier").unwrap();
+    assert_eq!(rule.get_string("match:title").unwrap(), "^(Magnifier)$");
+    assert_eq!(rule.get_int("float").unwrap(), 1); // "yes" -> true -> 1
+}
+
+#[test]
 fn test_windowrule_not_found() {
     let hypr = Hyprland::new();
 

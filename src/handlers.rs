@@ -124,6 +124,13 @@ pub enum HandlerScope {
     Category,
 }
 
+pub struct ResolvedHandlerCall<'a> {
+    pub handler: &'a dyn Handler,
+    pub handler_keyword: String,
+    pub actual_keyword: String,
+    pub flags: Option<String>,
+}
+
 /// Manager for keyword handlers
 pub struct HandlerManager {
     /// Global handlers
@@ -181,9 +188,63 @@ impl HandlerManager {
         self.global_handlers.get(keyword).map(|h| h.as_ref())
     }
 
+    fn resolve_in_map<'a>(
+        handlers: &'a HashMap<String, Box<dyn Handler>>,
+        keyword: &str,
+    ) -> Option<ResolvedHandlerCall<'a>> {
+        if let Some(handler) = handlers.get(keyword) {
+            return Some(ResolvedHandlerCall {
+                handler: handler.as_ref(),
+                handler_keyword: keyword.to_string(),
+                actual_keyword: keyword.to_string(),
+                flags: None,
+            });
+        }
+
+        if keyword.contains(':') {
+            return None;
+        }
+
+        let mut best_match: Option<(&str, &dyn Handler)> = None;
+        for (name, handler) in handlers {
+            if !handler.accepts_flags() || !keyword.starts_with(name) {
+                continue;
+            }
+
+            match best_match {
+                Some((best_name, _)) if best_name.len() >= name.len() => {}
+                _ => best_match = Some((name.as_str(), handler.as_ref())),
+            }
+        }
+
+        best_match.map(|(name, handler)| ResolvedHandlerCall {
+            handler,
+            handler_keyword: name.to_string(),
+            actual_keyword: keyword.to_string(),
+            flags: Some(keyword[name.len()..].to_string()),
+        })
+    }
+
+    pub fn resolve_invocation<'a>(
+        &'a self,
+        category_path: &[String],
+        keyword: &str,
+    ) -> Option<ResolvedHandlerCall<'a>> {
+        for i in (0..=category_path.len()).rev() {
+            let path = category_path[..i].join(":");
+            if let Some(handlers) = self.category_handlers.get(&path)
+                && let Some(resolved) = Self::resolve_in_map(handlers, keyword)
+            {
+                return Some(resolved);
+            }
+        }
+
+        Self::resolve_in_map(&self.global_handlers, keyword)
+    }
+
     /// Check if a handler exists for a keyword
     pub fn has_handler(&self, category_path: &[String], keyword: &str) -> bool {
-        self.find_handler(category_path, keyword).is_some()
+        self.resolve_invocation(category_path, keyword).is_some()
     }
 
     /// Execute a handler
@@ -207,10 +268,54 @@ impl HandlerManager {
         }
 
         let context = HandlerContext::new(keyword.to_string(), value.to_string())
-            .with_category(category_path.to_vec())
-            .with_flags(flags.unwrap_or_default());
+            .with_category(category_path.to_vec());
+
+        let context = if let Some(flags) = flags {
+            context.with_flags(flags)
+        } else {
+            context
+        };
 
         handler.handle(&context)
+    }
+
+    pub fn execute_resolved(
+        &self,
+        category_path: &[String],
+        resolved: &ResolvedHandlerCall<'_>,
+        value: &str,
+    ) -> ParseResult<()> {
+        if resolved.flags.is_some() && !resolved.handler.accepts_flags() {
+            return Err(ConfigError::handler(
+                &resolved.actual_keyword,
+                "handler does not accept flags",
+            ));
+        }
+
+        let context = HandlerContext::new(resolved.actual_keyword.clone(), value.to_string())
+            .with_category(category_path.to_vec());
+
+        let context = if let Some(flags) = resolved.flags.clone() {
+            context.with_flags(flags)
+        } else {
+            context
+        };
+
+        resolved.handler.handle(&context)
+    }
+
+    /// Unregister a global handler by keyword
+    pub fn unregister_global(&mut self, keyword: &str) -> bool {
+        self.global_handlers.remove(keyword).is_some()
+    }
+
+    /// Unregister a category-scoped handler
+    pub fn unregister_category(&mut self, category: &str, keyword: &str) -> bool {
+        if let Some(handlers) = self.category_handlers.get_mut(category) {
+            handlers.remove(keyword).is_some()
+        } else {
+            false
+        }
     }
 
     /// Clear all handlers
